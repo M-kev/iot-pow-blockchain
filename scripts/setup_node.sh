@@ -14,10 +14,10 @@ fi
 
 # Set the node ID based on the node number
 NODE_ID="pi_node_$NODE_NUM"
-echo "Setting up node: $NODE_ID"
+echo "Setting up PoW blockchain node: $NODE_ID"
 
-REPO_URL=https://github.com/M-kev/iot-dpos-blockchain.git  # <-- Replace with your actual repo URL
-REPO_DIR="$HOME/iot-dpos-blockchain"
+REPO_URL=https://github.com/M-kev/pow-iot-blockchain.git  # Updated for PoW
+REPO_DIR="$HOME/pow-iot-blockchain"
 
 # Clone the repository if not already present
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -34,40 +34,42 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Create necessary directories
-mkdir -p ~/iot-dpos-blockchain/blockchain_data
-mkdir -p ~/iot-dpos-blockchain/static
-mkdir -p ~/iot-dpos-blockchain/data  # For SQLite database
+mkdir -p ~/pow-iot-blockchain/blockchain_data
+mkdir -p ~/pow-iot-blockchain/static
+mkdir -p ~/pow-iot-blockchain/data  # For SQLite database
 
 # Set proper permissions
-chmod -R 755 ~/iot-dpos-blockchain
-chown -R $USER:$USER ~/iot-dpos-blockchain
+chmod -R 755 ~/pow-iot-blockchain
+chown -R $USER:$USER ~/pow-iot-blockchain
 
 # Ensure the data directory is writable
-chmod 777 ~/iot-dpos-blockchain/data
+chmod 777 ~/pow-iot-blockchain/data
 
 # Create an empty database file to ensure proper permissions
-touch ~/iot-dpos-blockchain/data/blockchain.db
-chmod 666 ~/iot-dpos-blockchain/data/blockchain.db
+touch ~/pow-iot-blockchain/data/blockchain.db
+chmod 666 ~/pow-iot-blockchain/data/blockchain.db
 
 # Create .env file with the correct NODE_ID
 echo "Creating .env file with NODE_ID=$NODE_ID"
-cat > ~/iot-dpos-blockchain/.env << EOF
+cat > ~/pow-iot-blockchain/.env << EOF
 NODE_ID=$NODE_ID
+MQTT_BROKER_HOST=192.168.2.10
+MQTT_BROKER_PORT=1883
 EOF
 
 # Create systemd service file
 sudo tee /etc/systemd/system/blockchain-node.service > /dev/null << EOF
 [Unit]
-Description=Blockchain Node Service
+Description=PoW Blockchain Node Service
 After=network.target
 
 [Service]
 User=$USER
-WorkingDirectory=$HOME/iot-dpos-blockchain
-Environment="PATH=$HOME/iot-dpos-blockchain/venv/bin:/usr/bin"
-Environment="PYTHONPATH=$HOME/iot-dpos-blockchain:$HOME/iot-dpos-blockchain/src"
+WorkingDirectory=$HOME/pow-iot-blockchain
+Environment="PATH=$HOME/pow-iot-blockchain/venv/bin:/usr/bin"
+Environment="PYTHONPATH=$HOME/pow-iot-blockchain:$HOME/pow-iot-blockchain/src"
 Environment="NODE_ID=$NODE_ID"
-ExecStart=$HOME/iot-dpos-blockchain/venv/bin/python $HOME/iot-dpos-blockchain/src/main.py
+ExecStart=$HOME/pow-iot-blockchain/venv/bin/python $HOME/pow-iot-blockchain/src/main.py
 Restart=always
 RestartSec=10
 
@@ -85,4 +87,5 @@ sudo systemctl start blockchain-node
 # Check service status
 sudo systemctl status blockchain-node
 
-echo "Raspberry Pi node setup complete for $NODE_ID!" 
+echo "PoW blockchain node setup complete for $NODE_ID!"
+echo "Dashboard available at: http://192.168.2.10$(($NODE_NUM + 105)):800$NODE_NUM" 
