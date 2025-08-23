@@ -44,7 +44,7 @@ This guide provides step-by-step instructions for deploying the energy-efficient
 2. Clone the repository:
    ```bash
    git clone https://github.com/M-kev/iot-pow-blockchain.git
-   cd pow-iot-blockchain
+   cd iot-pow-blockchain
    ```
 
 3. Make the setup script executable:
@@ -72,7 +72,7 @@ This guide provides step-by-step instructions for deploying the energy-efficient
 2. Clone the repository:
    ```bash
    git clone https://github.com/M-kev/iot-pow-blockchain.git
-   cd pow-iot-blockchain
+   cd iot-pow-blockchain
    ```
 
 3. Make the setup script executable:
