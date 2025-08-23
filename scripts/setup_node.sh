@@ -16,7 +16,7 @@ fi
 NODE_ID="pi_node_$NODE_NUM"
 echo "Setting up PoW blockchain node: $NODE_ID"
 
-REPO_URL=https://github.com/M-kev/pow-iot-blockchain.git  # Updated for PoW
+REPO_URL=https://github.com/M-kev/iot-pow-blockchain.git  # Updated for PoW
 REPO_DIR="$HOME/pow-iot-blockchain"
 
 # Clone the repository if not already present
