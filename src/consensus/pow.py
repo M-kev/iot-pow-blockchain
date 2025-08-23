@@ -10,7 +10,7 @@ class ProofOfWork:
     def __init__(self, target_block_time: float = 3.0, metrics: Optional[BlockchainMetrics] = None):
         # PoW Configuration
         self.target_block_time = target_block_time  # Target block time in seconds
-        self.difficulty = 1000  # Start with higher initial difficulty (more realistic)
+        self.difficulty = 1  # Start with difficulty 1 (correct for testing)
         self.max_difficulty = 2**32  # Maximum difficulty
         self.min_difficulty = 1  # Minimum difficulty
         
@@ -25,7 +25,7 @@ class ProofOfWork:
         self.metrics = metrics
         
         # Network hash rate tracking
-        self.network_hash_rate = 1000  # Initial hash rate (hashes per second)
+        self.network_hash_rate = 1000000  # Initial hash rate 1 MH/s (more realistic)
         self.last_difficulty_adjustment = time.time()
         self.difficulty_adjustment_interval = 10  # Adjust difficulty every 10 blocks (more frequent for testing)
         
@@ -287,9 +287,9 @@ class ProofOfWork:
                 self.is_mining = False
                 
                 # Calculate power usage during mining
-                # Use the mathematical model: Eblock = power_draw × E[Tblock]
+                # Use the actual mining time: Eblock = power_draw × actual_mining_time
                 power_draw = block_template['energy_metrics'].get('power_usage', 1.0)  # Default 1W
-                energy_per_block = self.calculate_energy_per_block(power_draw)
+                energy_per_block = power_draw * mining_time  # Use actual mining time, not expected time
                 
                 # Create the mined block
                 mined_block = Block(
@@ -465,12 +465,18 @@ class ProofOfWork:
     
     def calculate_expected_block_time(self) -> float:
         """
-        Calculate expected block time using the model: E[Tblock] = (difficulty × 2^32) / hash_rate
+        Calculate expected block time using the correct PoW model: E[Tblock] = (difficulty × 2^32) / hash_rate
+        This is the standard Bitcoin formula.
         """
         if self.network_hash_rate <= 0:
             return float('inf')
         
+        # Correct PoW formula: E[Tblock] = (difficulty × 2^32) / hash_rate
         expected_time = (self.difficulty * 2**32) / self.network_hash_rate
+        
+        # For testing, cap at reasonable bounds (between 0.1 and 300 seconds)
+        expected_time = max(0.1, min(300.0, expected_time))
+        
         return expected_time
     
     def calculate_transaction_throughput(self, tx_per_block: int, tx_arrival_rate: float) -> float:
@@ -487,9 +493,15 @@ class ProofOfWork:
     def calculate_energy_per_block(self, power_draw: float) -> float:
         """
         Calculate energy per block using the model: Eblock = power_draw × E[Tblock]
+        This is used for estimates, actual energy is calculated from real mining time.
         """
         expected_block_time = self.calculate_expected_block_time()
-        return power_draw * expected_block_time
+        energy_per_block = power_draw * expected_block_time
+        
+        # Ensure reasonable bounds (between 0.1 and 1000 watt-seconds)
+        energy_per_block = max(0.1, min(1000.0, energy_per_block))
+        
+        return energy_per_block
     
     def calculate_total_energy(self, power_draw: float, num_blocks: int) -> float:
         """

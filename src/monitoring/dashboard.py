@@ -195,8 +195,17 @@ async def get_dashboard():
         function updateDashboard(data) {
             // Update basic metrics
             document.getElementById('consensus-protocol').textContent = data.consensus_protocol || 'Proof of Work';
-            document.getElementById('overall-power-usage').textContent = 
-                `Cumulative Mining: ${data.power_metrics.total_power.toFixed(2)}W`;
+            // Format power usage with appropriate units
+            const totalPower = data.power_metrics.total_power;
+            let powerText;
+            if (totalPower >= 1000000) {
+                powerText = `Cumulative Mining: ${(totalPower / 1000000).toFixed(2)}MW`;
+            } else if (totalPower >= 1000) {
+                powerText = `Cumulative Mining: ${(totalPower / 1000).toFixed(2)}kW`;
+            } else {
+                powerText = `Cumulative Mining: ${totalPower.toFixed(2)}W`;
+            }
+            document.getElementById('overall-power-usage').textContent = powerText;
             document.getElementById('block-count').textContent = data.blockchain_metrics.total_blocks;
             document.getElementById('blockchain-size').textContent = 
                 `${(data.blockchain_size / (1024 * 1024)).toFixed(2)} MB`; // Convert bytes to MB
