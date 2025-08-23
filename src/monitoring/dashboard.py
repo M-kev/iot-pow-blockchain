@@ -350,5 +350,58 @@ async def get_energy() -> Dict[str, Any]:
         "timestamp": time.time()
     }
 
+@app.get("/api/export/block-metrics.csv")
+async def export_block_metrics_csv():
+    """Export block metrics as CSV."""
+    if metrics is None:
+        raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
+    
+    try:
+        # Get block metrics from storage
+        block_metrics = metrics.storage.export_block_metrics()
+        
+        if not block_metrics:
+            # Return empty CSV with headers
+            csv_content = "block_index,created_timestamp,block_interval,consensus_time,power_usage\n"
+        else:
+            # Convert to CSV
+            csv_content = "block_index,created_timestamp,block_interval,consensus_time,power_usage\n"
+            for metric in block_metrics:
+                csv_content += f"{metric['block_index']},{metric['created_timestamp']},{metric['block_interval']},{metric['consensus_time']},{metric['power_usage']}\n"
+        
+        from fastapi.responses import Response
+        return Response(content=csv_content, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=block-metrics.csv"})
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exporting block metrics: {str(e)}")
+
+@app.get("/api/export/transaction-lifecycle.csv")
+async def export_transaction_lifecycle_csv():
+    """Export transaction lifecycle as CSV."""
+    if metrics is None:
+        raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
+    
+    try:
+        # Get transaction lifecycle from storage
+        tx_lifecycle = metrics.storage.export_transaction_lifecycle()
+        
+        if not tx_lifecycle:
+            # Return empty CSV with headers
+            csv_content = "tx_hash,received_timestamp,included_timestamp,block_index\n"
+        else:
+            # Convert to CSV
+            csv_content = "tx_hash,received_timestamp,included_timestamp,block_index\n"
+            for tx in tx_lifecycle:
+                # Handle None values for pending transactions
+                included_ts = tx['included_timestamp'] if tx['included_timestamp'] is not None else ""
+                block_idx = tx['block_index'] if tx['block_index'] is not None else ""
+                csv_content += f"{tx['tx_hash']},{tx['received_timestamp']},{included_ts},{block_idx}\n"
+        
+        from fastapi.responses import Response
+        return Response(content=csv_content, media_type="text/csv", headers={"Content-Disposition": "attachment; filename=transaction-lifecycle.csv"})
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error exporting transaction lifecycle: {str(e)}")
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 
