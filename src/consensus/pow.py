@@ -10,7 +10,7 @@ class ProofOfWork:
     def __init__(self, target_block_time: float = 3.0, metrics: Optional[BlockchainMetrics] = None):
         # PoW Configuration
         self.target_block_time = target_block_time  # Target block time in seconds
-        self.difficulty = 1  # Initial mining difficulty
+        self.difficulty = 1000  # Start with higher initial difficulty (more realistic)
         self.max_difficulty = 2**32  # Maximum difficulty
         self.min_difficulty = 1  # Minimum difficulty
         
@@ -27,7 +27,7 @@ class ProofOfWork:
         # Network hash rate tracking
         self.network_hash_rate = 1000  # Initial hash rate (hashes per second)
         self.last_difficulty_adjustment = time.time()
-        self.difficulty_adjustment_interval = 2016  # Adjust difficulty every 2016 blocks (like Bitcoin)
+        self.difficulty_adjustment_interval = 10  # Adjust difficulty every 10 blocks (more frequent for testing)
         
         # Block time tracking for difficulty adjustment
         self.recent_block_times = []
@@ -37,6 +37,7 @@ class ProofOfWork:
         self.total_blocks_mined = 0
         self.total_mining_time = 0
         self.total_energy_consumed = 0
+        self.last_mining_time = None  # Track when we last mined
         
         # Bitcoin-style consensus rules
         self.max_block_size = 1024 * 1024  # 1MB block size limit (like Bitcoin)
@@ -318,6 +319,7 @@ class ProofOfWork:
                 # Update mining statistics
                 self.total_blocks_mined += 1
                 self.total_mining_time += mining_time
+                self.last_mining_time = time.time()  # Track when we last mined
                 
                 print(f"[PoW] Block mined successfully!")
                 print(f"[PoW] Hash: {block_hash}")
@@ -428,21 +430,33 @@ class ProofOfWork:
         Args:
             recent_block_times: List of recent block intervals
         """
-        if len(recent_block_times) < 10:  # Need at least 10 blocks for adjustment
+        if len(recent_block_times) < 5:  # Need at least 5 blocks for adjustment (more responsive)
             return
         
         # Calculate average block time
         avg_block_time = sum(recent_block_times) / len(recent_block_times)
         
-        # Adjust difficulty based on target block time
-        if avg_block_time > self.target_block_time * 1.1:  # Too slow
-            self.difficulty = max(self.min_difficulty, int(self.difficulty * 0.9))
-            print(f"[PoW] Decreasing difficulty to {self.difficulty} (avg block time: {avg_block_time:.2f}s)")
-        elif avg_block_time < self.target_block_time * 0.9:  # Too fast
-            self.difficulty = min(self.max_difficulty, int(self.difficulty * 1.1))
-            print(f"[PoW] Increasing difficulty to {self.difficulty} (avg block time: {avg_block_time:.2f}s)")
+        # More aggressive difficulty adjustment based on how far off we are
+        time_ratio = avg_block_time / self.target_block_time
+        
+        if time_ratio > 1.5:  # Much too slow (>50% slower)
+            adjustment_factor = 0.7  # Reduce difficulty by 30%
+            self.difficulty = max(self.min_difficulty, int(self.difficulty * adjustment_factor))
+            print(f"[PoW] Significantly decreasing difficulty to {self.difficulty} (avg block time: {avg_block_time:.2f}s, ratio: {time_ratio:.2f})")
+        elif time_ratio > 1.1:  # Too slow (>10% slower)
+            adjustment_factor = 0.85  # Reduce difficulty by 15%
+            self.difficulty = max(self.min_difficulty, int(self.difficulty * adjustment_factor))
+            print(f"[PoW] Decreasing difficulty to {self.difficulty} (avg block time: {avg_block_time:.2f}s, ratio: {time_ratio:.2f})")
+        elif time_ratio < 0.5:  # Much too fast (<50% of target)
+            adjustment_factor = 2.0  # Double difficulty
+            self.difficulty = min(self.max_difficulty, int(self.difficulty * adjustment_factor))
+            print(f"[PoW] Significantly increasing difficulty to {self.difficulty} (avg block time: {avg_block_time:.2f}s, ratio: {time_ratio:.2f})")
+        elif time_ratio < 0.9:  # Too fast (<90% of target)
+            adjustment_factor = 1.3  # Increase difficulty by 30%
+            self.difficulty = min(self.max_difficulty, int(self.difficulty * adjustment_factor))
+            print(f"[PoW] Increasing difficulty to {self.difficulty} (avg block time: {avg_block_time:.2f}s, ratio: {time_ratio:.2f})")
         else:
-            print(f"[PoW] Difficulty unchanged at {self.difficulty} (avg block time: {avg_block_time:.2f}s)")
+            print(f"[PoW] Difficulty unchanged at {self.difficulty} (avg block time: {avg_block_time:.2f}s, ratio: {time_ratio:.2f})")
     
     def update_network_hash_rate(self, new_hash_rate: float) -> None:
         """Update the network hash rate estimate."""
@@ -491,7 +505,22 @@ class ProofOfWork:
     
     def is_mining_active(self) -> bool:
         """Check if mining is currently active."""
-        return self.is_mining
+        # Consider mining active if we've mined blocks recently or are currently mining
+        # This provides a more meaningful status for the dashboard
+        current_time = time.time()
+        recent_mining_threshold = 30  # Consider "active" if we mined in the last 30 seconds
+        
+        # Check if we're currently mining
+        if self.is_mining:
+            return True
+        
+        # Check if we've mined recently (within the threshold)
+        if hasattr(self, 'last_mining_time') and self.last_mining_time:
+            time_since_last_mining = current_time - self.last_mining_time
+            if time_since_last_mining < recent_mining_threshold:
+                return True
+        
+        return False
     
     def get_mining_stats(self) -> Dict[str, Any]:
         """Get mining statistics."""

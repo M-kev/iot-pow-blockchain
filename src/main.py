@@ -270,9 +270,9 @@ class BlockchainNode:
             except Exception as e:
                 print(f"[LIFECYCLE] Failed to record metrics tx received: {e}")
             # Update difficulty based on recent block times (PoW equivalent)
-            if len(self.blocks) > 10:
+            if len(self.blocks) > 5:  # Adjust difficulty after 5 blocks (more responsive)
                 recent_block_times = []
-                for i in range(1, min(11, len(self.blocks))):
+                for i in range(1, min(6, len(self.blocks))):  # Use last 5 blocks
                     block_time = self.blocks[-i].timestamp - self.blocks[-(i+1)].timestamp
                     recent_block_times.append(block_time)
                 self.pow.adjust_difficulty(recent_block_times)
@@ -344,9 +344,9 @@ class BlockchainNode:
         
         print("Chain synchronization complete")
         # Update difficulty after synchronization
-        if len(self.blocks) > 10:
+        if len(self.blocks) > 5:  # Adjust difficulty after 5 blocks (more responsive)
             recent_block_times = []
-            for i in range(1, min(11, len(self.blocks))):
+            for i in range(1, min(6, len(self.blocks))):  # Use last 5 blocks
                 block_time = self.blocks[-i].timestamp - self.blocks[-(i+1)].timestamp
                 recent_block_times.append(block_time)
             self.pow.adjust_difficulty(recent_block_times)
@@ -464,6 +464,7 @@ class BlockchainNode:
                 # Publish metrics
                 self.mqtt_client.publish_metrics(metrics_to_publish)
                 print(f"[METRICS] Node {self.node_id} published metrics. Timestamp: {metrics_to_publish['timestamp']}")
+                print(f"[METRICS] Node {self.node_id} mining status: {metrics_to_publish['is_mining']}")
                 
             except Exception as e:
                 print(f"[ERROR] Failed to publish metrics: {e}")
