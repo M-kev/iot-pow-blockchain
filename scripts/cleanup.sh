@@ -51,12 +51,13 @@ echo "🗑️  Cleaning test files..."
 rm -f ~/iot-pow-blockchain/test_*.py
 rm -f ~/iot-pow-blockchain/*_test.py
 
-# Remove virtual environment
-echo "🗑️  Removing Python virtual environment..."
-rm -rf ~/iot-pow-blockchain/venv
+# Preserve virtual environment (for faster redeployment)
+echo "🐍 Preserving Python virtual environment (for faster redeployment)..."
+# Note: Virtual environment is kept to avoid reinstalling packages
 
 # Remove the entire repository directory (optional)
 echo "🗑️  Do you want to remove the entire repository directory? (y/n)"
+echo "   Note: Virtual environment will be preserved for faster redeployment"
 read -r response
 if [[ "$response" =~ ^[Yy]$ ]]; then
     echo "   Removing repository directory..."
@@ -89,7 +90,7 @@ echo "   - Removed all blockchain databases (node-specific and general)"
 echo "   - Removed data directories and static files"
 echo "   - Cleaned temporary, cache, and test files"
 echo "   - Removed environment configuration"
-echo "   - Removed Python virtual environment"
+echo "   - Preserved Python virtual environment (for faster redeployment)"
 echo "   - Cleaned Python cache files"
 
 echo ""
