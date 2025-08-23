@@ -11,38 +11,47 @@ class MQTTClient:
     def __init__(self, node_id: str, node_config: Dict[str, Any]):
         self.node_id = node_id
         self.node_config = node_config
-        self.client = mqtt.Client()
+        self.clients = []  # Multiple MQTT clients for redundancy
         self.connected = False
-        self.active_broker = None
+        self.active_brokers = []  # Track all connected brokers
         self.message_handlers = {}
         
-        # Set up callbacks
-        self.client.on_connect = self._on_connect
-        self.client.on_message = self._on_message
-        self.client.on_disconnect = self._on_disconnect
+        # Create MQTT clients for each broker
+        for i, broker in enumerate(MQTT_BROKERS):
+            client = mqtt.Client()
+            client.on_connect = lambda client, userdata, flags, rc, broker_index=i: self._on_connect(client, userdata, flags, rc, broker_index)
+            client.on_message = self._on_message
+            client.on_disconnect = lambda client, userdata, rc, broker_index=i: self._on_disconnect(client, userdata, rc, broker_index)
+            
+            # Set up reconnection
+            client.reconnect_delay_set(min_delay=1, max_delay=120)
+            
+            self.clients.append(client)
         
-        # Set up reconnection
-        self.client.reconnect_delay_set(min_delay=1, max_delay=120)
-        
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, broker_index):
         """Callback when connected to MQTT broker."""
+        broker = MQTT_BROKERS[broker_index]
         if rc == 0:
             self.connected = True
-            print(f"[MQTT] Connected to broker successfully")
+            self.active_brokers.append(broker)
+            print(f"[MQTT] Connected to broker {broker_index + 1} ({broker['host']}:{broker['port']}) successfully")
             # Subscribe to all topics
             for topic in MQTT_TOPICS.values():
-                self.client.subscribe(topic)
-                print(f"[MQTT] Subscribed to {topic}")
+                client.subscribe(topic)
+                print(f"[MQTT] Subscribed to {topic} on broker {broker_index + 1}")
         else:
-            print(f"[MQTT] Connection failed with code {rc}")
-            self.connected = False
+            print(f"[MQTT] Connection to broker {broker_index + 1} failed with code {rc}")
     
-    def _on_disconnect(self, client, userdata, rc):
+    def _on_disconnect(self, client, userdata, rc, broker_index):
         """Callback when disconnected from MQTT broker."""
-        self.connected = False
-        print(f"[MQTT] Disconnected from broker with code {rc}")
+        broker = MQTT_BROKERS[broker_index]
+        if broker in self.active_brokers:
+            self.active_brokers.remove(broker)
+        if not self.active_brokers:
+            self.connected = False
+        print(f"[MQTT] Disconnected from broker {broker_index + 1} ({broker['host']}:{broker['port']}) with code {rc}")
         if rc != 0:
-            print("[MQTT] Unexpected disconnection, attempting to reconnect...")
+            print(f"[MQTT] Unexpected disconnection from broker {broker_index + 1}, attempting to reconnect...")
     
     def _on_message(self, client, userdata, msg):
         """Callback when message is received."""
@@ -63,69 +72,92 @@ class MQTTClient:
             print(f"[MQTT] Error processing message: {e}")
     
     def connect(self) -> bool:
-        """Connect to MQTT broker with fallback."""
-        for broker in MQTT_BROKERS:
+        """Connect to all MQTT brokers for redundancy."""
+        network_threads = []
+        
+        for i, broker in enumerate(MQTT_BROKERS):
             try:
-                print(f"[MQTT] Attempting to connect to {broker['host']}:{broker['port']}")
-                self.client.connect(broker['host'], broker['port'], 60)
-                self.active_broker = broker
+                print(f"[MQTT] Attempting to connect to broker {i + 1}: {broker['host']}:{broker['port']}")
+                print(f"[MQTT] Broker config: {broker}")
                 
-                # Start the network loop in a separate thread
-                self.network_thread = threading.Thread(target=self._network_loop, daemon=True)
-                self.network_thread.start()
+                client = self.clients[i]
+                client.connect(broker['host'], broker['port'], 60)
                 
-                # Wait a bit for connection to establish
-                time.sleep(2)
+                # Start the network loop in a separate thread for each client
+                network_thread = threading.Thread(target=self._network_loop, args=(client,), daemon=True)
+                network_thread.start()
+                network_threads.append(network_thread)
                 
-                if self.connected:
-                    print(f"[MQTT] Successfully connected to {broker['host']}:{broker['port']}")
-                    return True
-                    
             except Exception as e:
-                print(f"[MQTT] Failed to connect to {broker['host']}:{broker['port']}: {e}")
+                print(f"[MQTT] Failed to connect to broker {i + 1} ({broker['host']}:{broker['port']}): {e}")
                 continue
         
-        print("[MQTT] Failed to connect to any broker")
-        return False
+        # Wait a bit for connections to establish
+        time.sleep(3)
+        
+        if self.connected:
+            print(f"[MQTT] Successfully connected to {len(self.active_brokers)} broker(s)")
+            for broker in self.active_brokers:
+                print(f"[MQTT] Active broker: {broker['host']}:{broker['port']}")
+            return True
+        else:
+            print("[MQTT] Failed to connect to any broker")
+            return False
     
-    def _network_loop(self):
+    def _network_loop(self, client):
         """Network loop for MQTT client."""
         try:
-            self.client.loop_forever()
+            client.loop_forever()
         except Exception as e:
             print(f"[MQTT] Network loop error: {e}")
     
     def disconnect(self):
-        """Disconnect from MQTT broker."""
-        if self.connected:
-            self.client.disconnect()
-            self.connected = False
-            print("[MQTT] Disconnected from broker")
+        """Disconnect from all MQTT brokers."""
+        for client in self.clients:
+            try:
+                client.disconnect()
+            except:
+                pass
+        self.connected = False
+        self.active_brokers.clear()
+        print("[MQTT] Disconnected from all brokers")
     
     def subscribe(self, topic: str, handler: Callable[[Dict[str, Any]], None]):
-        """Subscribe to a topic with a message handler."""
+        """Subscribe to a topic with a message handler on all brokers."""
         self.message_handlers[topic] = handler
         if self.connected:
-            self.client.subscribe(topic)
-            print(f"[MQTT] Subscribed to {topic}")
+            for client in self.clients:
+                try:
+                    client.subscribe(topic)
+                    print(f"[MQTT] Subscribed to {topic} on all brokers")
+                except Exception as e:
+                    print(f"[MQTT] Failed to subscribe to {topic}: {e}")
     
     def publish(self, topic: str, message: Dict[str, Any]):
-        """Publish a message to a topic."""
+        """Publish a message to a topic on all connected brokers."""
         if not self.connected:
-            print("[MQTT] Not connected, cannot publish message")
+            print(f"[MQTT] Not connected, cannot publish message to {topic}")
             return
         
         try:
             payload = json.dumps(message)
-            result = self.client.publish(topic, payload)
+            published_count = 0
             
-            if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                print(f"[MQTT] Published to {topic}")
+            for client in self.clients:
+                try:
+                    result = client.publish(topic, payload)
+                    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                        published_count += 1
+                except Exception as e:
+                    print(f"[MQTT] Failed to publish to {topic} on one broker: {e}")
+            
+            if published_count > 0:
+                print(f"[MQTT] Published to {topic} on {published_count} broker(s): {len(payload)} bytes")
             else:
-                print(f"[MQTT] Failed to publish to {topic}: {result.rc}")
+                print(f"[MQTT] Failed to publish to {topic} on any broker")
                 
         except Exception as e:
-            print(f"[MQTT] Error publishing message: {e}")
+            print(f"[MQTT] Error publishing message to {topic}: {e}")
     
     def publish_block(self, block_data: Dict[str, Any]):
         """Publish a new block to the network."""
@@ -151,7 +183,7 @@ class MQTTClient:
         """Get current network status."""
         return {
             'connected': self.connected,
-            'active_broker': self.active_broker,
+            'active_brokers': [f"{broker['host']}:{broker['port']}" for broker in self.active_brokers],
             'node_id': self.node_id,
             'subscribed_topics': list(self.message_handlers.keys())
         } 

@@ -22,10 +22,16 @@ RASPBERRY_PI_SETTINGS = {
 # MQTT Broker Configuration
 MQTT_BROKERS = [
     {
-        'host': os.getenv('MQTT_BROKER_HOST', 'localhost'),
-        'port': int(os.getenv('MQTT_BROKER_PORT', 1883)),
-        'username': os.getenv('MQTT_BROKER_USERNAME', None),
-        'password': os.getenv('MQTT_BROKER_PASSWORD', None)
+        'host': os.getenv('MQTT_BROKER_HOST_1', '192.168.2.10'),
+        'port': int(os.getenv('MQTT_BROKER_PORT_1', 1883)),
+        'username': os.getenv('MQTT_BROKER_USERNAME_1', None),
+        'password': os.getenv('MQTT_BROKER_PASSWORD_1', None)
+    },
+    {
+        'host': os.getenv('MQTT_BROKER_HOST_2', '192.168.2.11'),
+        'port': int(os.getenv('MQTT_BROKER_PORT_2', 1883)),
+        'username': os.getenv('MQTT_BROKER_USERNAME_2', None),
+        'password': os.getenv('MQTT_BROKER_PASSWORD_2', None)
     }
 ]
 

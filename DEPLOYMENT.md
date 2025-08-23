@@ -36,7 +36,8 @@ This guide provides step-by-step instructions for deploying the energy-efficient
 
 ## MQTT Broker Deployment
 
-1. SSH into the MQTT broker VM:
+### Broker 1 (192.168.2.10)
+1. SSH into the first MQTT broker VM:
    ```bash
    ssh user@192.168.2.10
    ```
@@ -52,9 +53,36 @@ This guide provides step-by-step instructions for deploying the energy-efficient
    chmod +x scripts/setup_broker.sh
    ```
 
-4. Run the setup script:
+4. Run the setup script for broker 1:
    ```bash
-   ./scripts/setup_broker.sh
+   ./scripts/setup_broker.sh 1
+   ```
+
+5. Verify MQTT broker status:
+   ```bash
+   sudo systemctl status mosquitto
+   ```
+
+### Broker 2 (192.168.2.11)
+1. SSH into the second MQTT broker VM:
+   ```bash
+   ssh user@192.168.2.11
+   ```
+
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/M-kev/iot-pow-blockchain.git
+   cd iot-pow-blockchain
+   ```
+
+3. Make the setup script executable:
+   ```bash
+   chmod +x scripts/setup_broker.sh
+   ```
+
+4. Run the setup script for broker 2:
+   ```bash
+   ./scripts/setup_broker.sh 2
    ```
 
 5. Verify MQTT broker status:
