@@ -37,6 +37,7 @@ class GenesisBlock:
                 "memory_percent": 0,
                 "temperature": 0,
                 "power_usage": 0,
+                "energy_per_block": 0,  # Genesis block has no energy consumption
                 "difficulty": self.initial_difficulty,
                 "nonce": 0,
                 "mining_time": 0,

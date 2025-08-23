@@ -275,6 +275,32 @@ class BlockchainNode:
                     recent_block_times.append(block_time)
                 self.pow.adjust_difficulty(recent_block_times)
         
+    async def _generate_test_transactions(self):
+        """Generate test transactions to simulate real blockchain activity."""
+        import random
+        
+        # Generate a test transaction every 30 seconds with 20% probability
+        if random.random() < 0.2:  # 20% chance
+            # Create a simple transfer transaction
+            test_transaction = {
+                "type": "transfer",
+                "sender": f"pi_node_{random.randint(1, 6)}",
+                "recipient": f"pi_node_{random.randint(1, 6)}",
+                "amount": round(random.uniform(1.0, 100.0), 2),
+                "timestamp": time.time(),
+                "description": "Test transaction"
+            }
+            
+            # Add to pending transactions
+            self.pending_transactions.append(test_transaction)
+            print(f"[TEST TX] Generated test transaction: {test_transaction['sender']} -> {test_transaction['recipient']} ({test_transaction['amount']})")
+            
+            # Publish transaction to network
+            self.mqtt_client.publish_transaction(test_transaction)
+            
+            # Record transaction for metrics
+            self.metrics.record_transactions(1)
+    
     def _check_system_health(self) -> bool:
         """Check if the system is healthy enough to process blocks."""
         metrics = self.energy_monitor.get_system_metrics()
@@ -444,6 +470,9 @@ class BlockchainNode:
             # Process pending transactions and create blocks if we're mining
     async def _process_transactions_periodically(self):
         while True:
+            # Generate test transactions periodically to simulate real blockchain activity
+            await self._generate_test_transactions()
+            
             # In PoW, any node can attempt to mine a block
             # Check if enough time has passed since the last block
             previous_block_timestamp = self.blocks[-1].timestamp if self.blocks else 0.0
@@ -474,67 +503,73 @@ class BlockchainNode:
             else:
                 print(f"[PROCESS TX] Time to mine a block for {self.node_id}.")
 
+            # In PoW, we can mine blocks even without transactions (like Bitcoin)
+            # This ensures continuous block production and network security
+            start_time = time.time()
+            
+            # Prepare block data for mining
+            transactions_to_include = self.pending_transactions[:10] if self.pending_transactions else []
+            
             if self.pending_transactions:
                 print(f"[PROCESS TX] {len(self.pending_transactions)} pending transactions found.")
-                start_time = time.time()
-
-                # Prepare block data for mining
-                block_data = {
-                    'block_index': len(self.blocks),
-                    'timestamp': time.time(),
-                    'transactions': self.pending_transactions[:10],  # Limit transactions per block
-                    'previous_hash': self.blocks[-1].hash if self.blocks else "0" * 64,
-                    'miner': self.node_id,
-                    'energy_metrics': self.energy_monitor.get_system_metrics()
-                }
-                
-                # Mine the block using PoW
-                new_block = self.pow.mine_block(block_data, max_time=30.0)  # 30 second mining timeout
-                
-                if not new_block:
-                    print(f"[PROCESS TX] Mining failed or timed out for {self.node_id}")
-                    await asyncio.sleep(1)
-                    continue
-
-                print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
-
-                # Record propagation delay
-                self.metrics.record_propagation_delay(time.time() - start_time)
-
-                # Publish new block
-                self.mqtt_client.publish_block(new_block.to_dict())
-                print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
-
-                # Add block to local chain and save to storage
-                self.blocks.append(new_block)
-                self.storage.save_block(new_block)
-                # Persist per-block analytics
-                try:
-                    interval = new_block.timestamp - previous_block_timestamp
-                    consensus_time = new_block.energy_metrics.get('consensus_time', 0)
-                    power_usage = new_block.energy_metrics.get('power_usage', 0)
-                    self.storage.save_block_metrics(new_block.block_index, new_block.timestamp, interval, consensus_time, power_usage)
-                except Exception as e:
-                    print(f"[ANALYTICS] Failed saving block metrics for local block {new_block.block_index}: {e}")
-                print(f"[PROCESS TX] Block {new_block.hash} added to local chain and saved.")
-
-                # Record metrics for charts
-                self.metrics.record_block_time(new_block.timestamp - previous_block_timestamp)
-                self.metrics.record_consensus_time(new_block.energy_metrics.get('consensus_time', 0))
-
-                # Publish mining status
-                self.mqtt_client.publish_miner_status({
-                    'node_id': self.node_id,
-                    'block_count': len(self.blocks),
-                    'hash_rate': self.pow.network_hash_rate,
-                    'difficulty': self.pow.difficulty,
-                    'mining_time': new_block.energy_metrics.get('mining_time', 0)
-                })
-
-                # Clear processed transactions
-                self.pending_transactions = self.pending_transactions[10:]
             else:
-                print("[PROCESS TX] No pending transactions to process.")
+                print(f"[PROCESS TX] No pending transactions, mining empty block.")
+            
+            block_data = {
+                'block_index': len(self.blocks),
+                'timestamp': time.time(),
+                'transactions': transactions_to_include,
+                'previous_hash': self.blocks[-1].hash if self.blocks else "0" * 64,
+                'miner': self.node_id,
+                'energy_metrics': self.energy_monitor.get_system_metrics()
+            }
+            
+            # Mine the block using PoW
+            new_block = self.pow.mine_block(block_data, max_time=30.0)  # 30 second mining timeout
+            
+            if not new_block:
+                print(f"[PROCESS TX] Mining failed or timed out for {self.node_id}")
+                await asyncio.sleep(1)
+                continue
+
+            print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
+
+            # Record propagation delay
+            self.metrics.record_propagation_delay(time.time() - start_time)
+
+            # Publish new block
+            self.mqtt_client.publish_block(new_block.to_dict())
+            print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
+
+            # Add block to local chain and save to storage
+            self.blocks.append(new_block)
+            self.storage.save_block(new_block)
+            # Persist per-block analytics
+            try:
+                interval = new_block.timestamp - previous_block_timestamp
+                consensus_time = new_block.energy_metrics.get('consensus_time', 0)
+                power_usage = new_block.energy_metrics.get('power_usage', 0)
+                self.storage.save_block_metrics(new_block.block_index, new_block.timestamp, interval, consensus_time, power_usage)
+            except Exception as e:
+                print(f"[ANALYTICS] Failed saving block metrics for local block {new_block.block_index}: {e}")
+            print(f"[PROCESS TX] Block {new_block.hash} added to local chain and saved.")
+
+            # Record metrics for charts
+            self.metrics.record_block_time(new_block.timestamp - previous_block_timestamp)
+            self.metrics.record_consensus_time(new_block.energy_metrics.get('consensus_time', 0))
+
+            # Publish mining status
+            self.mqtt_client.publish_miner_status({
+                'node_id': self.node_id,
+                'block_count': len(self.blocks),
+                'hash_rate': self.pow.network_hash_rate,
+                'difficulty': self.pow.difficulty,
+                'mining_time': new_block.energy_metrics.get('mining_time', 0)
+            })
+
+            # Clear processed transactions (only if there were any)
+            if self.pending_transactions:
+                self.pending_transactions = self.pending_transactions[10:]
             await asyncio.sleep(1) # Check frequently
 
     async def _synchronize_chain_periodically(self):

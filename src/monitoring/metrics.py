@@ -92,26 +92,33 @@ class BlockchainMetrics:
         }
 
     def get_cumulative_mining_power(self) -> float:
-        """Calculate cumulative power used for mining from genesis to current block."""
+        """Calculate cumulative energy used for mining from genesis to current block."""
         # Get all blocks from storage
         total_blocks = self.get_chain_length()
         if total_blocks == 0:
             return 0.0
         
-        # Get blocks from storage to calculate actual cumulative power
+        # Get blocks from storage to calculate actual cumulative energy
         blocks = self.storage.get_blocks(0, total_blocks - 1)
-        cumulative_power = 0.0
+        cumulative_energy = 0.0
         
         for block in blocks:
-            # Extract power usage from block's energy metrics
+            # Extract energy per block from block's energy metrics
             if hasattr(block, 'energy_metrics') and block.energy_metrics:
-                power_usage = block.energy_metrics.get('power_usage', 0.5)
-                cumulative_power += power_usage
-            else:
-                # Fallback to estimated power per block
-                cumulative_power += 0.5
+                # Use energy_per_block if available, otherwise calculate from power_usage and mining_time
+                if 'energy_per_block' in block.energy_metrics:
+                    energy_per_block = block.energy_metrics.get('energy_per_block', 0.0)
+                    cumulative_energy += energy_per_block
+                elif 'power_usage' in block.energy_metrics and 'mining_time' in block.energy_metrics:
+                    power_usage = block.energy_metrics.get('power_usage', 1.0)
+                    mining_time = block.energy_metrics.get('mining_time', 0.0)
+                    energy_per_block = power_usage * mining_time
+                    cumulative_energy += energy_per_block
+                else:
+                    # Fallback to estimated energy per block (1W * 3 seconds = 3W)
+                    cumulative_energy += 3.0
         
-        return cumulative_power
+        return cumulative_energy
 
     def get_power_metrics(self) -> dict:
         # Return cumulative mining power instead of current total power
