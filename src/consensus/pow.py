@@ -288,8 +288,7 @@ class ProofOfWork:
                 # Calculate power usage during mining
                 # Use the mathematical model: Eblock = power_draw × E[Tblock]
                 power_draw = block_template['energy_metrics'].get('power_usage', 1.0)  # Default 1W
-                expected_block_time = self.calculate_expected_block_time()
-                energy_per_block = self.calculate_energy_per_block(power_draw, expected_block_time)
+                energy_per_block = self.calculate_energy_per_block(power_draw)
                 
                 # Create the mined block
                 mined_block = Block(
@@ -306,7 +305,7 @@ class ProofOfWork:
                         'hash_rate': self.network_hash_rate,
                         'power_usage': power_draw,  # Power draw during mining
                         'energy_per_block': energy_per_block,  # Energy consumed for this block
-                        'expected_block_time': expected_block_time
+                        'expected_block_time': self.calculate_expected_block_time()
                     }
                 )
                 
