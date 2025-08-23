@@ -48,10 +48,27 @@ class ProofOfWork:
         
     def calculate_target_difficulty(self) -> int:
         """Calculate the target difficulty based on current network conditions."""
-        # Target difficulty is inversely proportional to the difficulty value
-        # Lower difficulty = higher target (easier to mine)
-        # Higher difficulty = lower target (harder to mine)
-        return int(2**256 // self.difficulty)
+        # For testing purposes, we want a reasonable target that requires some work
+        # but isn't impossible to achieve
+        
+        if self.difficulty <= 0:
+            return 2**256 - 1  # Maximum target (easiest)
+        
+        # For difficulty 1, we want to require some work but not too much
+        # Let's say we want approximately 1 in 2^16 hashes to be valid for difficulty 1
+        # This means target = 2^256 / 2^16 = 2^240
+        
+        # Scale this with difficulty: target = 2^240 / difficulty
+        base_target = 2**240  # Base target for difficulty 1
+        target = base_target // self.difficulty
+        
+        # Ensure target is within reasonable bounds
+        min_target = 2**224  # Minimum target (hardest)
+        max_target = 2**256 - 1  # Maximum target (easiest)
+        
+        target = max(min_target, min(max_target, target))
+        
+        return target
     
     def calculate_chain_work(self, blocks: List[Block]) -> int:
         """
@@ -252,6 +269,8 @@ class ProofOfWork:
         
         print(f"[PoW] Starting mining with difficulty: {self.difficulty}")
         print(f"[PoW] Target difficulty: {target_difficulty}")
+        print(f"[PoW] Target in hex: {hex(target_difficulty)}")
+        print(f"[PoW] Max nonce: {self.max_nonce}")
         
         # Create block template
         block_template = {
@@ -283,6 +302,11 @@ class ProofOfWork:
             
             # Check if hash meets target difficulty
             if hash_int < target_difficulty:
+                print(f"[PoW] Valid hash found at nonce {nonce}!")
+                print(f"[PoW] Hash: {block_hash}")
+                print(f"[PoW] Hash int: {hash_int}")
+                print(f"[PoW] Target: {target_difficulty}")
+                print(f"[PoW] Hash < Target: {hash_int < target_difficulty}")
                 mining_time = time.time() - start_time
                 self.is_mining = False
                 
