@@ -120,10 +120,59 @@ class BlockchainMetrics:
         
         return cumulative_energy
 
+    def get_network_total_energy(self) -> float:
+        """Calculate total energy used across the entire network by aggregating from all nodes."""
+        import httpx
+        import asyncio
+        from config.network_config import RASPBERRY_PI_NODES
+        
+        total_network_energy = 0.0
+        node_energies = {}
+        
+        # Get energy from local node
+        local_energy = self.get_cumulative_mining_power()
+        total_network_energy += local_energy
+        node_energies[self.local_node_id] = local_energy
+        
+        # Get energy from all other nodes
+        for node in RASPBERRY_PI_NODES:
+            if node['id'] == self.local_node_id:
+                continue  # Skip local node
+                
+            try:
+                # Query each node's API for their cumulative energy
+                url = f"http://{node['ip']}:{node['dashboard_port']}/api/energy"
+                response = httpx.get(url, timeout=5.0)
+                
+                if response.status_code == 200:
+                    energy_data = response.json()
+                    node_energy = energy_data.get('cumulative_energy', 0.0)
+                    total_network_energy += node_energy
+                    node_energies[node['id']] = node_energy
+                    print(f"[ENERGY] {node['id']}: {node_energy:.2f} watt-seconds")
+                else:
+                    print(f"[ENERGY] Failed to get energy from {node['id']}: HTTP {response.status_code}")
+                    node_energies[node['id']] = 0.0
+                    
+            except Exception as e:
+                print(f"[ENERGY] Error getting energy from {node['id']}: {e}")
+                node_energies[node['id']] = 0.0
+        
+        print(f"[ENERGY] Network total: {total_network_energy:.2f} watt-seconds")
+        print(f"[ENERGY] Node breakdown: {node_energies}")
+        
+        return total_network_energy
+
     def get_power_metrics(self) -> dict:
-        # Return cumulative mining power instead of current total power
-        cumulative_mining_power = self.get_cumulative_mining_power()
-        return {"total_power": cumulative_mining_power}
+        # Return network-wide cumulative mining power
+        try:
+            network_total_energy = self.get_network_total_energy()
+            return {"total_power": network_total_energy}
+        except Exception as e:
+            print(f"[POWER METRICS] Error getting network energy, falling back to local: {e}")
+            # Fallback to local energy if network aggregation fails
+            local_energy = self.get_cumulative_mining_power()
+            return {"total_power": local_energy}
 
     def get_blockchain_metrics(self) -> dict:
         # This will be refined, currently mostly local node's perspective

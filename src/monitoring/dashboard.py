@@ -335,5 +335,19 @@ async def get_system_metrics() -> Dict[str, Any]:
     
     return metrics.get_system_metrics()
 
+@app.get("/api/energy")
+async def get_energy() -> Dict[str, Any]:
+    """Get energy consumption data for this node."""
+    if metrics is None:
+        raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
+    
+    cumulative_energy = metrics.get_cumulative_mining_power()
+    
+    return {
+        "cumulative_energy": cumulative_energy,
+        "node_id": metrics.local_node_id,
+        "timestamp": time.time()
+    }
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 
