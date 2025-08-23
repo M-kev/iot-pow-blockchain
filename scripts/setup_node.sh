@@ -17,7 +17,7 @@ NODE_ID="pi_node_$NODE_NUM"
 echo "Setting up PoW blockchain node: $NODE_ID"
 
 REPO_URL=https://github.com/M-kev/iot-pow-blockchain.git  # Updated for PoW
-REPO_DIR="$HOME/pow-iot-blockchain"
+REPO_DIR="$HOME/iot-pow-blockchain"
 
 # Clone the repository if not already present
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -34,24 +34,24 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Create necessary directories
-mkdir -p ~/pow-iot-blockchain/blockchain_data
-mkdir -p ~/pow-iot-blockchain/static
-mkdir -p ~/pow-iot-blockchain/data  # For SQLite database
+mkdir -p ~/iot-pow-blockchain/blockchain_data
+mkdir -p ~/iot-pow-blockchain/static
+mkdir -p ~/iot-pow-blockchain/data  # For SQLite database
 
 # Set proper permissions
-chmod -R 755 ~/pow-iot-blockchain
-chown -R $USER:$USER ~/pow-iot-blockchain
+chmod -R 755 ~/iot-pow-blockchain
+chown -R $USER:$USER ~/iot-pow-blockchain
 
 # Ensure the data directory is writable
-chmod 777 ~/pow-iot-blockchain/data
+chmod 777 ~/iot-pow-blockchain/data
 
 # Create an empty database file to ensure proper permissions
-touch ~/pow-iot-blockchain/data/blockchain.db
-chmod 666 ~/pow-iot-blockchain/data/blockchain.db
+touch ~/iot-pow-blockchain/data/blockchain.db
+chmod 666 ~/iot-pow-blockchain/data/blockchain.db
 
 # Create .env file with the correct NODE_ID
 echo "Creating .env file with NODE_ID=$NODE_ID"
-cat > ~/pow-iot-blockchain/.env << EOF
+cat > ~/iot-pow-blockchain/.env << EOF
 NODE_ID=$NODE_ID
 MQTT_BROKER_HOST=192.168.2.10
 MQTT_BROKER_PORT=1883
@@ -65,11 +65,11 @@ After=network.target
 
 [Service]
 User=$USER
-WorkingDirectory=$HOME/pow-iot-blockchain
-Environment="PATH=$HOME/pow-iot-blockchain/venv/bin:/usr/bin"
-Environment="PYTHONPATH=$HOME/pow-iot-blockchain:$HOME/pow-iot-blockchain/src"
+WorkingDirectory=$HOME/iot-pow-blockchain
+Environment="PATH=$HOME/iot-pow-blockchain/venv/bin:/usr/bin"
+Environment="PYTHONPATH=$HOME/iot-pow-blockchain:$HOME/iot-pow-blockchain/src"
 Environment="NODE_ID=$NODE_ID"
-ExecStart=$HOME/pow-iot-blockchain/venv/bin/python $HOME/pow-iot-blockchain/src/main.py
+ExecStart=$HOME/iot-pow-blockchain/venv/bin/python $HOME/iot-pow-blockchain/src/main.py
 Restart=always
 RestartSec=10
 

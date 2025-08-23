@@ -33,12 +33,41 @@ class SQLiteStorage:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Check if we need to migrate from validator to miner column
+            cursor.execute("PRAGMA table_info(blocks)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'validator' in columns and 'miner' not in columns:
+                print("[STORAGE] Migrating validator column to miner column...")
+                # Create new table with miner column
+                cursor.execute('''
+                    CREATE TABLE blocks_new (
+                        block_index INTEGER PRIMARY KEY,
+                        timestamp REAL,
+                        miner TEXT,
+                        previous_hash TEXT,
+                        hash TEXT,
+                        transactions TEXT,
+                        energy_metrics TEXT
+                    )
+                ''')
+                # Copy data from old table to new table
+                cursor.execute('''
+                    INSERT INTO blocks_new 
+                    SELECT block_index, timestamp, validator, previous_hash, hash, transactions, energy_metrics 
+                    FROM blocks
+                ''')
+                # Drop old table and rename new table
+                cursor.execute('DROP TABLE blocks')
+                cursor.execute('ALTER TABLE blocks_new RENAME TO blocks')
+                print("[STORAGE] Migration completed successfully")
+            
             # Create blocks table if it doesn't exist
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS blocks (
                     block_index INTEGER PRIMARY KEY,
                     timestamp REAL,
-                    validator TEXT,
+                    miner TEXT,
                     previous_hash TEXT,
                     hash TEXT,
                     transactions TEXT,
@@ -124,12 +153,12 @@ class SQLiteStorage:
             
             cursor.execute('''
                 INSERT OR REPLACE INTO blocks 
-                (block_index, timestamp, validator, previous_hash, hash, transactions, energy_metrics)
+                (block_index, timestamp, miner, previous_hash, hash, transactions, energy_metrics)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 block.block_index,
                 block.timestamp,
-                block.validator,
+                block.miner,
                 block.previous_hash,
                 block.hash,
                 transactions_json,
@@ -288,7 +317,7 @@ class SQLiteStorage:
                 block = Block(
                     block_index=row[0],
                     timestamp=row[1],
-                    validator=row[2],
+                    miner=row[2],
                     previous_hash=row[3],
                     transactions=transactions,
                     energy_metrics=energy_metrics
@@ -340,7 +369,7 @@ class SQLiteStorage:
                 block = Block(
                     block_index=row[0],
                     timestamp=row[1],
-                    validator=row[2],
+                    miner=row[2],
                     previous_hash=row[3],
                     transactions=transactions,
                     energy_metrics=energy_metrics
@@ -370,7 +399,7 @@ class SQLiteStorage:
                 block = Block(
                     block_index=row[0],
                     timestamp=row[1],
-                    validator=row[2],
+                    miner=row[2],
                     previous_hash=row[3],
                     transactions=transactions,
                     energy_metrics=energy_metrics
