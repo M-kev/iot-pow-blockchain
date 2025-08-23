@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+import time
 from typing import Dict, Any, Optional, List
 from monitoring.metrics import BlockchainMetrics
 
