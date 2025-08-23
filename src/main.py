@@ -40,7 +40,9 @@ class BlockchainNode:
         
         # Initialize components
         self.energy_monitor = EnergyMonitor()
-        self.storage = SQLiteStorage(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'blockchain.db'))
+        # Use node-specific database file to avoid conflicts
+        db_filename = f'blockchain_{self.node_id}.db'
+        self.storage = SQLiteStorage(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', db_filename))
         self.metrics = BlockchainMetrics(self.node_id, self.storage)
         set_metrics_instance(self.metrics)
         self.pow = ProofOfWork(target_block_time=3.0, metrics=self.metrics)
@@ -485,6 +487,11 @@ class BlockchainNode:
                 await asyncio.sleep(1)
                 continue
             
+            # Add randomization to prevent all nodes from mining simultaneously
+            import random
+            mining_delay = random.uniform(0, 0.5)  # Random delay up to 0.5 seconds
+            await asyncio.sleep(mining_delay)
+            
             print(f"[PROCESS TX] {self.node_id} attempting to mine a block.")
 
             # Check system health before proposing a block
@@ -533,6 +540,8 @@ class BlockchainNode:
                 continue
 
             print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
+            print(f"[PROCESS TX] Block miner: {new_block.miner}")
+            print(f"[PROCESS TX] Current node: {self.node_id}")
 
             # Record propagation delay
             self.metrics.record_propagation_delay(time.time() - start_time)
