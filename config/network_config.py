@@ -75,7 +75,7 @@ MQTT_TOPICS = {
     "TRANSACTIONS": "transactions",
     "METRICS": "metrics",
     "NETWORK_STATUS": "network/status",
-    "VALIDATOR_STATUS": "miner/status"  # Keep same key but update topic name
+    "MINER_STATUS": "miner/status"  # Updated key name for consistency
 }
 
 def get_node_config(node_id: str) -> Optional[Dict[str, Any]]:

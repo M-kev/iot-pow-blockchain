@@ -132,7 +132,7 @@ class BlockchainNode:
         self.mqtt_client.subscribe(MQTT_TOPICS["BLOCKS"], self._handle_new_block)
         self.mqtt_client.subscribe(MQTT_TOPICS["TRANSACTIONS"], self._handle_new_transaction)
         self.mqtt_client.subscribe(MQTT_TOPICS["NETWORK_STATUS"], self._handle_network_status)
-        self.mqtt_client.subscribe(MQTT_TOPICS["VALIDATOR_STATUS"], self._handle_miner_status)
+        self.mqtt_client.subscribe(MQTT_TOPICS["MINER_STATUS"], self._handle_miner_status)
         self.mqtt_client.subscribe(MQTT_TOPICS["METRICS"], self._handle_incoming_metrics)
         
     def _handle_new_block(self, block_data: dict) -> None:
@@ -441,7 +441,7 @@ class BlockchainNode:
                 
             await asyncio.sleep(RASPBERRY_PI_SETTINGS['metrics_interval'])
 
-    # Process pending transactions and create blocks if we're the current validator
+            # Process pending transactions and create blocks if we're mining
     async def _process_transactions_periodically(self):
         while True:
             # In PoW, any node can attempt to mine a block

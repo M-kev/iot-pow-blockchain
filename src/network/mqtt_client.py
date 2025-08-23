@@ -145,7 +145,7 @@ class MQTTClient:
     
     def publish_miner_status(self, status_data: Dict[str, Any]):
         """Publish miner status to the network."""
-        self.publish(MQTT_TOPICS["VALIDATOR_STATUS"], status_data)
+        self.publish(MQTT_TOPICS["MINER_STATUS"], status_data)
     
     def get_network_status(self) -> Dict[str, Any]:
         """Get current network status."""
