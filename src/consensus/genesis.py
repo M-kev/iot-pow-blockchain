@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import Dict, Any
 from .block import Block
 
@@ -14,7 +15,7 @@ class GenesisBlock:
             "pi_node_5",
             "pi_node_6"
         ]
-        self.fixed_timestamp = 1717777777  # Use a constant value for determinism
+        self.fixed_timestamp = int(time.time())  # Use current timestamp for realistic intervals
         self.initial_difficulty = 1  # Initial mining difficulty for PoW
         
     def create_genesis_block(self) -> Block:

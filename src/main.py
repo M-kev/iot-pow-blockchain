@@ -194,7 +194,11 @@ class BlockchainNode:
             
             # Persist per-block analytics
             try:
-                interval = block.timestamp - previous_block_timestamp
+                # For genesis block, set interval to 0 to avoid unrealistic values
+                if block.block_index == 0:
+                    interval = 0.0
+                else:
+                    interval = block.timestamp - previous_block_timestamp
                 consensus_time = block.energy_metrics.get('consensus_time', 0)
                 power_usage = block.energy_metrics.get('power_usage', 0)
                 self.storage.save_block_metrics(block.block_index, block.timestamp, interval, consensus_time, power_usage)
@@ -557,7 +561,11 @@ class BlockchainNode:
             self.storage.save_block(new_block)
             # Persist per-block analytics
             try:
-                interval = new_block.timestamp - previous_block_timestamp
+                # For genesis block, set interval to 0 to avoid unrealistic values
+                if new_block.block_index == 0:
+                    interval = 0.0
+                else:
+                    interval = new_block.timestamp - previous_block_timestamp
                 consensus_time = new_block.energy_metrics.get('consensus_time', 0)
                 power_usage = new_block.energy_metrics.get('power_usage', 0)
                 self.storage.save_block_metrics(new_block.block_index, new_block.timestamp, interval, consensus_time, power_usage)
