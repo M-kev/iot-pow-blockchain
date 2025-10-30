@@ -163,12 +163,17 @@ class BlockchainNode:
 
         # Check energy metrics before validation
         energy_metrics = self.energy_monitor.get_system_metrics()
-        if self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index):
+        # Monitor block validation resource usage
+        with self.metrics.monitor_operation('block_validation', f"validate-{block.block_index}"):
+            valid = self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
+        if valid:
             print(f"[HANDLE BLOCK] Block {block.hash} validation successful.")
             
             # Add block to local chain
             self.blocks.append(block)
+            _db_start = time.time()
             self.storage.save_block(block)
+            self.metrics.record_database_operation('save_block', time.time() - _db_start, rows_affected=1)
             
             # Process any pending orphan blocks
             self.blocks = self.pow.process_pending_blocks(self.blocks)
@@ -183,7 +188,9 @@ class BlockchainNode:
                 self.blocks = best_chain
                 # Update storage with the best chain
                 for block in best_chain:
+                    _db_start2 = time.time()
                     self.storage.save_block(block)
+                    self.metrics.record_database_operation('save_block', time.time() - _db_start2, rows_affected=1)
             
             # Record metrics
             if len(self.blocks) > 1:
@@ -466,7 +473,12 @@ class BlockchainNode:
                 print(f"[DEBUG] MQTT client object: {self.mqtt_client}")
                 
                 # Publish metrics
+                _net_start_m = time.time()
                 self.mqtt_client.publish_metrics(metrics_to_publish)
+                try:
+                    self.metrics.record_network_operation('publish_metrics', bytes_transferred=len(json.dumps(metrics_to_publish)), duration=time.time() - _net_start_m, success=True)
+                except Exception:
+                    pass
                 print(f"[METRICS] Node {self.node_id} published metrics. Timestamp: {metrics_to_publish['timestamp']}")
                 print(f"[METRICS] Node {self.node_id} mining status: {metrics_to_publish['is_mining']}")
                 
@@ -537,8 +549,9 @@ class BlockchainNode:
                 'energy_metrics': self.energy_monitor.get_system_metrics()
             }
             
-            # Mine the block using PoW
-            new_block = self.pow.mine_block(block_data, max_time=30.0)  # 30 second mining timeout
+            # Mine the block using PoW with resource monitoring
+            with self.metrics.monitor_operation('block_creation', f"create-{block_data['block_index']}"):
+                new_block = self.pow.mine_block(block_data, max_time=30.0)  # 30 second mining timeout
             
             if not new_block:
                 print(f"[PROCESS TX] Mining failed or timed out for {self.node_id}")
@@ -553,12 +566,20 @@ class BlockchainNode:
             self.metrics.record_propagation_delay(time.time() - start_time)
 
             # Publish new block
-            self.mqtt_client.publish_block(new_block.to_dict())
+            block_payload = new_block.to_dict()
+            _net_start = time.time()
+            self.mqtt_client.publish_block(block_payload)
+            try:
+                self.metrics.record_network_operation('publish_block', bytes_transferred=len(json.dumps(block_payload)), duration=time.time() - _net_start, success=True)
+            except Exception:
+                pass
             print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
 
             # Add block to local chain and save to storage
             self.blocks.append(new_block)
+            _db_start3 = time.time()
             self.storage.save_block(new_block)
+            self.metrics.record_database_operation('save_block', time.time() - _db_start3, rows_affected=1)
             # Persist per-block analytics
             try:
                 # For genesis block, set interval to 0 to avoid unrealistic values

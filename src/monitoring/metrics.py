@@ -2,6 +2,10 @@ from collections import defaultdict, deque
 import time
 from storage.sqlite_storage import SQLiteStorage
 from consensus.block import Block
+from typing import Any, Dict, List, Optional
+import psutil
+import threading
+from contextlib import contextmanager
 
 class BlockchainMetrics:
     def __init__(self, local_node_id: str, storage: SQLiteStorage):
@@ -33,6 +37,169 @@ class BlockchainMetrics:
             'timestamp': 0
         })
         self.current_difficulty = 1  # PoW: current mining difficulty
+
+        # Resource and operation metrics (IoT-DPoS parity)
+        self.resource_metrics_history: deque = deque(maxlen=100)
+        self.operation_metrics: Dict[str, List[Dict[str, Any]]] = {
+            'block_validation': [],
+            'block_creation': [],
+            'network_operations': [],
+            'database_operations': []
+        }
+        self._op_lock = threading.Lock()
+
+    @contextmanager
+    def monitor_operation(self, operation_type: str, operation_id: Optional[str] = None):
+        """Context manager to record resource usage around an operation."""
+        start_time = time.time()
+        cpu_initial = psutil.cpu_percent(interval=None)
+        mem_info_initial = psutil.virtual_memory()
+        net_initial = psutil.net_io_counters()
+        error: Optional[str] = None
+        try:
+            yield
+        except Exception as e:
+            error = str(e)
+            raise
+        finally:
+            end_time = time.time()
+            duration = max(0.0, end_time - start_time)
+            cpu_final = psutil.cpu_percent(interval=None)
+            # Approximate average as mean of initial and final samples
+            cpu_avg = (cpu_initial + cpu_final) / 2.0
+            mem_info_final = psutil.virtual_memory()
+            memory_initial_mb = mem_info_initial.used / (1024 * 1024)
+            memory_final_mb = mem_info_final.used / (1024 * 1024)
+            memory_delta_mb = memory_final_mb - memory_initial_mb
+            net_final = psutil.net_io_counters()
+            record = {
+                'operation_id': operation_id or f"{operation_type}-{int(start_time*1000)}",
+                'operation_type': operation_type,
+                'start_time': start_time,
+                'end_time': end_time,
+                'duration': duration,
+                'cpu_usage': {
+                    'initial': cpu_initial,
+                    'final': cpu_final,
+                    'avg': cpu_avg
+                },
+                'memory_usage': {
+                    'initial_mb': memory_initial_mb,
+                    'final_mb': memory_final_mb,
+                    'memory_delta_mb': memory_delta_mb
+                },
+                'network_usage': {
+                    'bytes_sent': max(0, net_final.bytes_sent - net_initial.bytes_sent),
+                    'bytes_recv': max(0, net_final.bytes_recv - net_initial.bytes_recv),
+                    'packets_sent': max(0, net_final.packets_sent - net_initial.packets_sent),
+                    'packets_recv': max(0, net_final.packets_recv - net_initial.packets_recv)
+                },
+                'error': error
+            }
+            with self._op_lock:
+                self.resource_metrics_history.append(record)
+                if operation_type in self.operation_metrics:
+                    self.operation_metrics[operation_type].append(record)
+                else:
+                    # Allow ad-hoc operation types
+                    self.operation_metrics.setdefault(operation_type, []).append(record)
+
+    def record_network_operation(self, operation: str, bytes_transferred: int, duration: float, success: bool = True):
+        throughput_mbps = 0.0
+        if duration > 0:
+            throughput_mbps = (bytes_transferred * 8) / (duration * 1_000_000)
+        entry = {
+            'operation': operation,
+            'timestamp': time.time(),
+            'bytes_transferred': int(bytes_transferred),
+            'duration': float(duration),
+            'success': bool(success),
+            'throughput_mbps': throughput_mbps
+        }
+        with self._op_lock:
+            self.operation_metrics['network_operations'].append(entry)
+
+    def record_database_operation(self, operation: str, duration: float, rows_affected: int = 0):
+        throughput = 0.0
+        if duration > 0:
+            throughput = rows_affected / duration
+        entry = {
+            'operation': operation,
+            'timestamp': time.time(),
+            'duration': float(duration),
+            'rows_affected': int(rows_affected),
+            'throughput_rows_per_sec': throughput
+        }
+        with self._op_lock:
+            self.operation_metrics['database_operations'].append(entry)
+
+    def get_resource_metrics(self) -> Dict[str, Any]:
+        """Return recent operation records and per-type summaries plus current system state."""
+        recent_ops = list(self.resource_metrics_history)
+
+        def summarize_block_ops(op_type: str) -> Dict[str, Any]:
+            ops = self.operation_metrics.get(op_type, [])
+            if not ops:
+                return {'count': 0, 'avg_duration': 0.0, 'avg_cpu': 0.0, 'avg_memory_delta': 0.0, 'total_network_bytes': 0}
+            count = len(ops)
+            avg_duration = sum(o.get('duration', 0.0) for o in ops) / count
+            avg_cpu = sum((o.get('cpu_usage', {}).get('avg', 0.0) for o in ops)) / count
+            avg_memory_delta = sum((o.get('memory_usage', {}).get('memory_delta_mb', 0.0) for o in ops)) / count
+            total_network_bytes = sum((o.get('network_usage', {}).get('bytes_sent', 0) + o.get('network_usage', {}).get('bytes_recv', 0) for o in ops))
+            return {
+                'count': count,
+                'avg_duration': avg_duration,
+                'avg_cpu': avg_cpu,
+                'avg_memory_delta': avg_memory_delta,
+                'total_network_bytes': total_network_bytes
+            }
+
+        net_ops = self.operation_metrics.get('network_operations', [])
+        db_ops = self.operation_metrics.get('database_operations', [])
+        net_summary = {
+            'count': len(net_ops),
+            'avg_duration': (sum(o.get('duration', 0.0) for o in net_ops) / len(net_ops)) if net_ops else 0.0,
+            'total_bytes_transferred': sum(o.get('bytes_transferred', 0) for o in net_ops),
+            'avg_throughput_mbps': (sum(o.get('throughput_mbps', 0.0) for o in net_ops) / len(net_ops)) if net_ops else 0.0
+        }
+        db_summary = {
+            'count': len(db_ops),
+            'avg_duration': (sum(o.get('duration', 0.0) for o in db_ops) / len(db_ops)) if db_ops else 0.0,
+            'total_rows_affected': sum(o.get('rows_affected', 0) for o in db_ops),
+            'avg_throughput_rows_per_sec': (sum(o.get('throughput_rows_per_sec', 0.0) for o in db_ops) / len(db_ops)) if db_ops else 0.0
+        }
+
+        vm = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        net = psutil.net_io_counters()
+        current_state = {
+            'cpu_percent': psutil.cpu_percent(interval=None),
+            'memory_percent': vm.percent,
+            'memory_available_mb': vm.available / (1024 * 1024),
+            'disk_usage_percent': disk.percent,
+            'network_io': {
+                'bytes_sent': net.bytes_sent,
+                'bytes_recv': net.bytes_recv,
+                'packets_sent': net.packets_sent,
+                'packets_recv': net.packets_recv
+            }
+        }
+
+        return {
+            'recent_operations': recent_ops,
+            'operation_summaries': {
+                'block_validation': summarize_block_ops('block_validation'),
+                'block_creation': summarize_block_ops('block_creation'),
+                'network_operations': net_summary,
+                'database_operations': db_summary
+            },
+            'current_system_state': current_state
+        }
+
+    def get_operation_metrics(self, operation_type: Optional[str] = None):
+        if operation_type:
+            return self.operation_metrics.get(operation_type, [])
+        return self.operation_metrics
 
     def record_block_time(self, value):
         self.block_time_history.append(value)
