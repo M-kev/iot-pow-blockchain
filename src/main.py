@@ -733,7 +733,7 @@ class BlockchainNode:
                     for block_data in blocks_data:
                         try:
                             block = Block.from_dict(block_data)
-                                self.storage.save_block(block)
+                            self.storage.save_block(block)
                         except Exception as e:
                             print(f"[SYNC] Error processing block from {peer['id']}: {e}")
                             continue
