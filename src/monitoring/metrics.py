@@ -8,7 +8,7 @@ import threading
 from contextlib import contextmanager
 
 class BlockchainMetrics:
-    def __init__(self, local_node_id: str, storage: SQLiteStorage):
+    def __init__(self, local_node_id: str, storage: SQLiteStorage, pow_instance=None):
         self.metrics = {}
         self.tps_history = []
         self.consensus_time_history = []
@@ -19,6 +19,7 @@ class BlockchainMetrics:
         
         self.local_node_id = local_node_id
         self.storage = storage
+        self.pow_instance = pow_instance  # Reference to PoW instance for orphan block queries
         
         # Rolling window of transaction timestamps (seconds)
         self.transaction_events: deque[float] = deque()
@@ -425,6 +426,6 @@ class BlockchainMetrics:
     
     def get_orphan_blocks_count(self) -> int:
         """Get the number of orphan blocks currently stored."""
-        # This would need to be implemented in the PoW consensus class
-        # For now, return 0 as a placeholder
+        if self.pow_instance:
+            return len(self.pow_instance.orphan_blocks)
         return 0 

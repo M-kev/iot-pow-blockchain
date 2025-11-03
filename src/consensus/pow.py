@@ -42,7 +42,7 @@ class ProofOfWork:
         # Bitcoin-style consensus rules
         self.max_block_size = 1024 * 1024  # 1MB block size limit (like Bitcoin)
         self.confirmation_blocks = 6  # Number of confirmations for finality (like Bitcoin)
-        self.orphan_blocks: Dict[str, Block] = {}  # Store orphaned blocks
+        self.orphan_blocks: Dict[str, Dict[str, Any]] = {}  # Store orphaned blocks with metadata {'block': Block, 'timestamp': float, 'block_index': int}
         self.pending_blocks: Dict[str, Block] = {}  # Store blocks waiting for parent
         self.chain_tips: Dict[str, Block] = {}  # Multiple chain tips for fork resolution
         
@@ -180,21 +180,53 @@ class ProofOfWork:
         tx_string = json.dumps(transaction, sort_keys=True)
         return hashlib.sha256(tx_string.encode()).hexdigest()
     
-    def handle_orphan_block(self, block: Block) -> bool:
+    def handle_orphan_block(self, block: Block, all_blocks: List[Block] = None) -> bool:
         """
         Handle orphan blocks (blocks whose parent we don't have yet).
         Returns True if the block was added to pending blocks.
+        
+        Args:
+            block: The block to check for orphan status
+            all_blocks: Optional list of all blocks to check against (if None, uses chain_tips)
         """
-        # Check if we have the parent block
-        parent_exists = any(b.hash == block.previous_hash for b in self.chain_tips.values())
+        # Check if we have the parent block - check against provided blocks or all chain tips
+        if all_blocks:
+            parent_exists = any(b.hash == block.previous_hash for b in all_blocks)
+        else:
+            parent_exists = any(b.hash == block.previous_hash for b in self.chain_tips.values())
         
         if not parent_exists:
-            # Store as orphan block
-            self.orphan_blocks[block.hash] = block
-            print(f"[PoW] Stored orphan block {block.hash} (parent {block.previous_hash} not found)")
+            # Store as orphan block with timestamp for cleanup
+            self.orphan_blocks[block.hash] = {
+                'block': block,
+                'timestamp': time.time(),
+                'block_index': block.block_index
+            }
+            print(f"[PoW] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent {block.previous_hash[:16]}... not found)")
             return True
         
         return False
+    
+    def cleanup_old_orphans(self, max_age_seconds: float = 60.0) -> int:
+        """
+        Remove orphan blocks that are too old and can't be connected.
+        Returns number of orphan blocks cleaned up.
+        """
+        current_time = time.time()
+        cleaned = 0
+        
+        orphan_hashes = list(self.orphan_blocks.keys())
+        for orphan_hash in orphan_hashes:
+            orphan_entry = self.orphan_blocks[orphan_hash]
+            age = current_time - orphan_entry['timestamp']
+            
+            # Remove orphan blocks older than max_age_seconds
+            if age > max_age_seconds:
+                print(f"[PoW] Cleaning up old orphan block {orphan_hash[:16]}... (index {orphan_entry['block_index']}, age {age:.1f}s)")
+                del self.orphan_blocks[orphan_hash]
+                cleaned += 1
+        
+        return cleaned
     
     def process_pending_blocks(self, main_chain: List[Block]) -> List[Block]:
         """
@@ -207,18 +239,28 @@ class ProofOfWork:
         # Try to add orphan blocks that now have parents
         orphan_hashes = list(self.orphan_blocks.keys())
         for orphan_hash in orphan_hashes:
-            orphan_block = self.orphan_blocks[orphan_hash]
+            orphan_entry = self.orphan_blocks[orphan_hash]
+            orphan_block = orphan_entry['block']
             
             # Check if parent is now in main chain
             parent_in_chain = any(b.hash == orphan_block.previous_hash for b in updated_chain)
             
             if parent_in_chain:
                 # Validate the orphan block
-                if self.validate_block(orphan_block, 0, 0, 0):
-                    # Add to chain
-                    updated_chain.append(orphan_block)
+                previous_block = next((b for b in updated_chain if b.hash == orphan_block.previous_hash), None)
+                if previous_block:
+                    prev_timestamp = previous_block.timestamp
+                    prev_index = previous_block.block_index
+                else:
+                    prev_timestamp = 0.0
+                    prev_index = -1
+                
+                if self.validate_block(orphan_block, 0.0, prev_timestamp, prev_index):
+                    # Add to chain in correct position (after parent)
+                    parent_idx = next((i for i, b in enumerate(updated_chain) if b.hash == orphan_block.previous_hash), len(updated_chain))
+                    updated_chain.insert(parent_idx + 1, orphan_block)
                     processed_blocks.append(orphan_block)
-                    print(f"[PoW] Added orphan block {orphan_hash} to chain")
+                    print(f"[PoW] Added orphan block {orphan_hash[:16]}... (index {orphan_block.block_index}) to chain")
                 
                 # Remove from orphan blocks
                 del self.orphan_blocks[orphan_hash]

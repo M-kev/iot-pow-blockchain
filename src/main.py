@@ -43,11 +43,13 @@ class BlockchainNode:
         # Use node-specific database file to avoid conflicts
         db_filename = f'blockchain_{self.node_id}.db'
         self.storage = SQLiteStorage(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', db_filename))
-        self.metrics = BlockchainMetrics(self.node_id, self.storage)
+        self.pow = ProofOfWork(target_block_time=3.0, metrics=None)  # Create pow first, will set metrics after
+        self.metrics = BlockchainMetrics(self.node_id, self.storage, pow_instance=self.pow)
+        # Set metrics reference in pow
+        self.pow.metrics = self.metrics
         # Start monitoring from node startup
         self.metrics.start_monitoring()
         set_metrics_instance(self.metrics)
-        self.pow = ProofOfWork(target_block_time=3.0, metrics=self.metrics)
         print(f"[DEBUG] Initializing MQTT client for node: {self.node_id}")
         print(f"[DEBUG] Node config: {self.node_config}")
         print(f"[DEBUG] About to create MQTTClient instance...")
@@ -165,10 +167,18 @@ class BlockchainNode:
                 self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
                 return
             
-            # Check if this is an orphan block (parent not found)
-            if self.blocks and block.previous_hash != self.blocks[-1].hash:
-                if self.pow.handle_orphan_block(block):
-                    print(f"[HANDLE BLOCK] Stored orphan block {block.hash} for later processing")
+            # Check if this is an orphan block - check parent against ALL stored blocks, not just last one
+            # Get all blocks from storage to check comprehensively
+            all_stored_blocks = self.storage.get_blocks()
+            parent_exists = any(b.hash == block.previous_hash for b in all_stored_blocks)
+            
+            # Also check if this could be the next sequential block (most common case)
+            is_next_block = (self.blocks and block.previous_hash == self.blocks[-1].hash)
+            
+            # If parent doesn't exist and it's not the next sequential block, it's an orphan
+            if not parent_exists and not is_next_block and block.previous_hash != "0" * 64:  # Genesis parent hash
+                if self.pow.handle_orphan_block(block, all_stored_blocks):
+                    print(f"[HANDLE BLOCK] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent not found)")
                     # Still validate to track metrics for orphan handling
                     self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
                     return
@@ -447,7 +457,8 @@ class BlockchainNode:
         self.periodic_tasks = [
             asyncio.create_task(self._publish_metrics_periodically()),
             asyncio.create_task(self._process_transactions_periodically()),
-            asyncio.create_task(self._synchronize_chain_periodically())
+            asyncio.create_task(self._synchronize_chain_periodically()),
+            asyncio.create_task(self._cleanup_orphan_blocks_periodically())
         ]
         await asyncio.gather(*self.periodic_tasks)
 
@@ -626,6 +637,24 @@ class BlockchainNode:
         while True:
             await self._synchronize_chain()
             await asyncio.sleep(RASPBERRY_PI_SETTINGS['sync_interval'])
+
+    async def _cleanup_orphan_blocks_periodically(self):
+        """Periodically clean up orphan blocks that can't be connected."""
+        while True:
+            try:
+                # Clean up orphan blocks older than 60 seconds
+                cleaned = self.pow.cleanup_old_orphans(max_age_seconds=60.0)
+                if cleaned > 0:
+                    print(f"[CLEANUP] Removed {cleaned} old orphan block(s)")
+                
+                # Also process any pending orphans that can now be connected
+                self.blocks = self.pow.process_pending_blocks(self.blocks)
+                
+            except Exception as e:
+                print(f"[CLEANUP] Error cleaning up orphan blocks: {e}")
+            
+            # Run cleanup every 30 seconds
+            await asyncio.sleep(30.0)
 
 if __name__ == "__main__":
     node = BlockchainNode()
