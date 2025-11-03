@@ -338,7 +338,7 @@ async def get_block_headers(start_index: int = 0, end_index: int = -1) -> List[D
         raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
 
     try:
-        from ..consensus.block_header import BlockHeader
+        from consensus.block_header import BlockHeader
         
         # Get full blocks from storage
         blocks = metrics.get_blocks_from_storage(start_index, end_index)
