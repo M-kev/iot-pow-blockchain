@@ -33,46 +33,101 @@ class SQLiteStorage:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Check if we need to migrate from validator to miner column
+            # Check if we need to migrate the schema
             cursor.execute("PRAGMA table_info(blocks)")
-            columns = [column[1] for column in cursor.fetchall()]
+            table_info = cursor.fetchall()
+            columns = [column[1] for column in table_info]
+            primary_key_col = None
+            for col in table_info:
+                if col[5]:  # Column 5 is pk (primary key flag)
+                    primary_key_col = col[1]
             
-            if 'validator' in columns and 'miner' not in columns:
-                print("[STORAGE] Migrating validator column to miner column...")
-                # Create new table with miner column
+            # Migrate from block_index PRIMARY KEY to hash PRIMARY KEY (critical for fork resolution)
+            if primary_key_col == 'block_index':
+                print("[STORAGE] Migrating blocks table: block_index PRIMARY KEY -> hash PRIMARY KEY")
+                print("  This allows competing blocks at same index to coexist (required for fork resolution)")
+                # Create new table with hash as primary key
                 cursor.execute('''
                     CREATE TABLE blocks_new (
-                        block_index INTEGER PRIMARY KEY,
+                        hash TEXT PRIMARY KEY,
+                        block_index INTEGER NOT NULL,
                         timestamp REAL,
                         miner TEXT,
                         previous_hash TEXT,
-                        hash TEXT,
                         transactions TEXT,
                         energy_metrics TEXT
                     )
                 ''')
-                # Copy data from old table to new table
-                cursor.execute('''
-                    INSERT INTO blocks_new 
-                    SELECT block_index, timestamp, validator, previous_hash, hash, transactions, energy_metrics 
-                    FROM blocks
-                ''')
-                # Drop old table and rename new table
+                # Copy data (if hash column exists, use it; otherwise generate from data)
+                if 'hash' in columns:
+                    cursor.execute('''
+                        INSERT INTO blocks_new 
+                        SELECT hash, block_index, timestamp, 
+                               COALESCE(miner, validator, 'unknown') as miner,
+                               previous_hash, transactions, energy_metrics 
+                        FROM blocks
+                    ''')
+                else:
+                    # Old schema without hash - we'd need to recompute, but this shouldn't happen
+                    print("  WARNING: No hash column found. Cannot migrate without recomputing hashes.")
+                    print("  Consider clearing database and restarting.")
+                    cursor.execute('DROP TABLE IF EXISTS blocks_new')
+                    # Fall through to create new table below
+                
+                # Drop old table and rename
                 cursor.execute('DROP TABLE blocks')
                 cursor.execute('ALTER TABLE blocks_new RENAME TO blocks')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_block_index ON blocks(block_index)')
+                print("[STORAGE] Migration completed successfully")
+            
+            if 'validator' in columns and 'miner' not in columns:
+                print("[STORAGE] Migrating validator column to miner column...")
+                # Check current primary key - preserve it (should be hash after above migration)
+                current_pk = primary_key_col if primary_key_col else 'hash'
+                if current_pk == 'hash':
+                    # Table already has hash as PK, just add miner column
+                    cursor.execute('ALTER TABLE blocks ADD COLUMN miner TEXT')
+                    cursor.execute('UPDATE blocks SET miner = validator WHERE miner IS NULL')
+                else:
+                    # Old schema with block_index PK - create new table with hash PK
+                    cursor.execute('''
+                        CREATE TABLE blocks_new (
+                            hash TEXT PRIMARY KEY,
+                            block_index INTEGER NOT NULL,
+                            timestamp REAL,
+                            miner TEXT,
+                            previous_hash TEXT,
+                            transactions TEXT,
+                            energy_metrics TEXT
+                        )
+                    ''')
+                    cursor.execute('''
+                        INSERT INTO blocks_new 
+                        SELECT hash, block_index, timestamp, validator, previous_hash, transactions, energy_metrics 
+                        FROM blocks
+                    ''')
+                    cursor.execute('DROP TABLE blocks')
+                    cursor.execute('ALTER TABLE blocks_new RENAME TO blocks')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_block_index ON blocks(block_index)')
                 print("[STORAGE] Migration completed successfully")
             
             # Create blocks table if it doesn't exist
+            # CRITICAL: Use hash as PRIMARY KEY, not block_index, so competing blocks at same index can coexist
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS blocks (
-                    block_index INTEGER PRIMARY KEY,
+                    hash TEXT PRIMARY KEY,
+                    block_index INTEGER NOT NULL,
                     timestamp REAL,
                     miner TEXT,
                     previous_hash TEXT,
-                    hash TEXT,
                     transactions TEXT,
                     energy_metrics TEXT
                 )
+            ''')
+            
+            # Create index on block_index for fast lookups
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_block_index ON blocks(block_index)
             ''')
             
             # Per-block analytics table
@@ -153,14 +208,14 @@ class SQLiteStorage:
             
             cursor.execute('''
                 INSERT OR REPLACE INTO blocks 
-                (block_index, timestamp, miner, previous_hash, hash, transactions, energy_metrics)
+                (hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
+                block.hash,
                 block.block_index,
                 block.timestamp,
                 block.miner,
                 block.previous_hash,
-                block.hash,
                 transactions_json,
                 energy_metrics_json
             ))
@@ -301,12 +356,13 @@ class SQLiteStorage:
             return []
 
     def get_block(self, block_index: int) -> Optional[Block]:
-        """Retrieve a block by its block_index."""
+        """Retrieve a block by its block_index. If multiple blocks exist at this index, returns the first one found."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute('SELECT * FROM blocks WHERE block_index = ?', (block_index,))
+            # With new schema: hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics
+            cursor.execute('SELECT hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics FROM blocks WHERE block_index = ? LIMIT 1', (block_index,))
             row = cursor.fetchone()
             
             if row:
@@ -315,10 +371,10 @@ class SQLiteStorage:
                 energy_metrics = json.loads(row[6])
                 
                 block = Block(
-                    block_index=row[0],
-                    timestamp=row[1],
-                    miner=row[2],
-                    previous_hash=row[3],
+                    block_index=row[1],
+                    timestamp=row[2],
+                    miner=row[3],
+                    previous_hash=row[4],
                     transactions=transactions,
                     energy_metrics=energy_metrics
                 )
@@ -358,7 +414,8 @@ class SQLiteStorage:
             conn = self._get_connection()
             cursor = conn.cursor()
             
-            cursor.execute('SELECT * FROM blocks ORDER BY block_index DESC LIMIT 1')
+            # With new schema: hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics
+            cursor.execute('SELECT hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics FROM blocks ORDER BY block_index DESC LIMIT 1')
             row = cursor.fetchone()
             
             if row:
@@ -367,10 +424,10 @@ class SQLiteStorage:
                 energy_metrics = json.loads(row[6])
                 
                 block = Block(
-                    block_index=row[0],
-                    timestamp=row[1],
-                    miner=row[2],
-                    previous_hash=row[3],
+                    block_index=row[1],
+                    timestamp=row[2],
+                    miner=row[3],
+                    previous_hash=row[4],
                     transactions=transactions,
                     energy_metrics=energy_metrics
                 )
@@ -383,24 +440,25 @@ class SQLiteStorage:
             raise
 
     def get_blocks(self, start_index: int = 0, end_index: int = -1) -> List[Block]:
-        """Retrieve a range of blocks from storage."""
+        """Retrieve a range of blocks from storage. Returns ALL blocks at each index (includes competing forks)."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            # With new schema: hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics
             if end_index == -1:
-                cursor.execute('SELECT * FROM blocks WHERE block_index >= ? ORDER BY block_index ASC', (start_index,))
+                cursor.execute('SELECT hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics FROM blocks WHERE block_index >= ? ORDER BY block_index ASC', (start_index,))
             else:
-                cursor.execute('SELECT * FROM blocks WHERE block_index >= ? AND block_index <= ? ORDER BY block_index ASC', (start_index, end_index))
+                cursor.execute('SELECT hash, block_index, timestamp, miner, previous_hash, transactions, energy_metrics FROM blocks WHERE block_index >= ? AND block_index <= ? ORDER BY block_index ASC', (start_index, end_index))
             rows = cursor.fetchall()
             blocks = []
             for row in rows:
                 transactions = json.loads(row[5])
                 energy_metrics = json.loads(row[6])
                 block = Block(
-                    block_index=row[0],
-                    timestamp=row[1],
-                    miner=row[2],
-                    previous_hash=row[3],
+                    block_index=row[1],
+                    timestamp=row[2],
+                    miner=row[3],
+                    previous_hash=row[4],
                     transactions=transactions,
                     energy_metrics=energy_metrics
                 )
