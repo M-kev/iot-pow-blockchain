@@ -219,7 +219,10 @@ class BlockchainNode:
             # If parent doesn't exist and it's not the next sequential block and not a competing block, it's an orphan
             if not parent_exists and not is_next_block and not is_competing_block and block.previous_hash != "0" * 64:  # Genesis parent hash
                 if self.pow.handle_orphan_block(block, all_stored_blocks):
-                    print(f"[HANDLE BLOCK] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent not found)")
+                    print(f"[HANDLE BLOCK] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent {block.previous_hash[:16]}... not found)")
+                    print(f"[HANDLE BLOCK] This likely means node is on a different fork. Will sync with peers to get missing parent.")
+                    # Trigger async sync to fetch missing parent blocks
+                    asyncio.create_task(self._sync_for_missing_parents(block))
                     # Still validate to track metrics for orphan handling (but skip index/timestamp validation)
                     self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index, all_stored_blocks=all_stored_blocks)
                     return
@@ -430,6 +433,54 @@ class BlockchainNode:
                 recent_block_times.append(block_time)
             self.pow.adjust_difficulty(recent_block_times)
         print("Difficulty updated after chain synchronization.")
+    
+    async def _sync_for_missing_parents(self, orphan_block: Block) -> None:
+        """Sync with peers to get missing parent blocks for orphan blocks."""
+        missing_parent_hash = orphan_block.previous_hash
+        missing_parent_index = orphan_block.block_index - 1
+        
+        print(f"[SYNC MISSING] Requesting missing parent block (index {missing_parent_index}, hash {missing_parent_hash[:16]}...)")
+        
+        # Get all known peers
+        peers = [node for node in RASPBERRY_PI_NODES if node['id'] != self.node_id]
+        
+        # Try to get the missing parent from each peer
+        for peer in peers:
+            try:
+                peer_url = f"http://{peer['ip']}:{peer['dashboard_port']}/api/blocks"
+                # Request blocks around the missing parent index (in case we need more context)
+                start_idx = max(0, missing_parent_index - 1)
+                end_idx = orphan_block.block_index  # Request up to orphan block index
+                params = {'start_index': start_idx, 'end_index': end_idx}
+                
+                response = await self.http_client.get(peer_url, params=params, timeout=5)
+                if response.status_code == 200:
+                    blocks_data = response.json()
+                    found_parent = False
+                    # Save all blocks received (may include parent and other missing blocks)
+                    for block_data in blocks_data:
+                        block = Block.from_dict(block_data)
+                        # Save all blocks for fork resolution
+                        self.storage.save_block(block)
+                        if block.hash == missing_parent_hash:
+                            print(f"[SYNC MISSING] Found missing parent at {peer['id']}, saved.")
+                            found_parent = True
+                    
+                    if found_parent:
+                        # Process orphan blocks now that parent is available
+                        self.blocks = self.pow.process_pending_blocks(self.blocks)
+                        # Run fork resolution with all stored blocks
+                        all_blocks = self.storage.get_blocks()
+                        best_chain = self.pow.resolve_forks(all_blocks)
+                        if best_chain:
+                            print(f"[SYNC MISSING] Fork resolved after getting missing parent. Best chain: {len(best_chain)} blocks")
+                            self.blocks = best_chain
+                        return
+            except Exception as e:
+                print(f"[SYNC MISSING] Error syncing with {peer['id']} for missing parent: {e}")
+                continue
+        
+        print(f"[SYNC MISSING] Could not find missing parent {missing_parent_hash[:16]}... from any peer")
         
     async def _sync_with_peer(self, peer: Dict[str, Any], local_chain_length: int) -> None:
         """Synchronize with a specific peer node."""
