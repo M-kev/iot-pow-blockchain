@@ -300,7 +300,7 @@ class BlockchainNode:
                 # Ensure all blocks from best chain are saved
                 for block in best_chain:
                     _db_start2 = time.time()
-                self.storage.save_block(block)
+                    self.storage.save_block(block)
                     self.metrics.record_database_operation('save_block', time.time() - _db_start2, rows_affected=1)
                 
                 # Record metrics
