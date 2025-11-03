@@ -962,14 +962,14 @@ class BlockchainNode:
                 await asyncio.sleep(1)
                 continue
 
-                print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
+            print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
             print(f"[PROCESS TX] Block miner: {new_block.miner}")
             print(f"[PROCESS TX] Current node: {self.node_id}")
 
-                # Record propagation delay
-                self.metrics.record_propagation_delay(time.time() - start_time)
+            # Record propagation delay
+            self.metrics.record_propagation_delay(time.time() - start_time)
 
-                # Publish new block
+            # Publish new block
             block_payload = new_block.to_dict()
             _net_start = time.time()
             self.mqtt_client.publish_block(block_payload)
@@ -977,7 +977,7 @@ class BlockchainNode:
                 self.metrics.record_network_operation('publish_block', bytes_transferred=len(json.dumps(block_payload)), duration=time.time() - _net_start, success=True)
             except Exception:
                 pass
-                print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
+            print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
 
             # Save block to storage first (before adding to chain)
             _db_start3 = time.time()
