@@ -18,15 +18,18 @@ class Block:
         
     def calculate_hash(self) -> str:
         """Calculate the block hash using SHA-256."""
-        # Include PoW-specific fields in hash calculation
+        # CRITICAL: Must match mining hash calculation structure
+        # During mining, difficulty/nonce are at top level (not in energy_metrics yet)
+        # We need to extract them from energy_metrics and add them at top level
         block_data = {
             'block_index': self.block_index,
             'timestamp': self.timestamp,
             'transactions': self.transactions,
             'previous_hash': self.previous_hash,
             'miner': self.miner,
-            'energy_metrics': self.energy_metrics,
-            # PoW-specific fields
+            # Use original energy_metrics WITHOUT difficulty/nonce
+            'energy_metrics': {k: v for k, v in self.energy_metrics.items() if k not in ['difficulty', 'nonce']},
+            # PoW-specific fields at top level (matches mining template)
             'difficulty': self.energy_metrics.get('difficulty', 1),
             'nonce': self.energy_metrics.get('nonce', 0)
         }

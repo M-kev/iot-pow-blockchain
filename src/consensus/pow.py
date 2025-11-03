@@ -530,14 +530,18 @@ class ProofOfWork:
     
     def _validate_proof_of_work(self, block: Block) -> bool:
         """Validate the proof of work for a block."""
-        # Reconstruct block data for hash calculation
+        # CRITICAL: Must match mining template structure exactly
+        # difficulty/nonce are at top level, NOT in energy_metrics during mining
+        # So we extract them from energy_metrics and put them at top level
         block_data = {
             'block_index': block.block_index,
             'timestamp': block.timestamp,
             'transactions': block.transactions,
             'previous_hash': block.previous_hash,
             'miner': block.miner,
-            'energy_metrics': block.energy_metrics,
+            # energy_metrics WITHOUT difficulty/nonce (matches mining template)
+            'energy_metrics': {k: v for k, v in block.energy_metrics.items() if k not in ['difficulty', 'nonce']},
+            # difficulty/nonce at top level (matches mining template)
             'difficulty': block.energy_metrics.get('difficulty', self.difficulty),
             'nonce': block.energy_metrics.get('nonce', 0)
         }
