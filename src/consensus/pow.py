@@ -267,7 +267,10 @@ class ProofOfWork:
                     prev_timestamp = 0.0
                     prev_index = -1
                 
-                if self.validate_block(orphan_block, 0.0, prev_timestamp, prev_index):
+                # Validate orphan block now that parent is available
+                # Get all blocks for parent lookup (main chain + orphan block being processed)
+                all_blocks_for_validation = updated_chain + [orphan_block]
+                if self.validate_block(orphan_block, 0.0, prev_timestamp, prev_index, all_stored_blocks=all_blocks_for_validation):
                     # Add to chain in correct position (after parent)
                     parent_idx = next((i for i, b in enumerate(updated_chain) if b.hash == orphan_block.previous_hash), len(updated_chain))
                     updated_chain.insert(parent_idx + 1, orphan_block)
@@ -418,31 +421,53 @@ class ProofOfWork:
         self.is_mining = False
         return None
     
-    def validate_block(self, block: Block, power_usage: float, previous_block_timestamp: float, previous_block_index: int, sync_tolerance: float = 0.0) -> bool:
+    def validate_block(self, block: Block, power_usage: float, previous_block_timestamp: float, previous_block_index: int, sync_tolerance: float = 0.0, all_stored_blocks: List[Block] = None) -> bool:
         """
         Validate a block based on PoW rules and energy efficiency.
         
         Args:
             block: Block to validate
             power_usage: Current power usage
-            previous_block_timestamp: Timestamp of previous block
-            previous_block_index: Index of previous block
+            previous_block_timestamp: Timestamp of previous block (from block's parent)
+            previous_block_index: Index of previous block (from block's parent)
             sync_tolerance: Time tolerance for synchronization
+            all_stored_blocks: All blocks in storage (for checking if parent exists in any fork)
             
         Returns:
             True if block is valid, False otherwise
         """
         print(f"[PoW VALIDATE] Validating block {block.block_index}")
         
-        # Check if block_index is greater than previous block_index
-        if block.block_index <= previous_block_index:
-            print(f"[PoW VALIDATE] Block index {block.block_index} is not greater than previous {previous_block_index}")
-            return False
+        # Find the actual parent block in storage (may be in a different fork)
+        parent_block = None
+        if all_stored_blocks:
+            for stored_block in all_stored_blocks:
+                if stored_block.hash == block.previous_hash:
+                    parent_block = stored_block
+                    break
         
-        # Check if block timestamp is greater than previous block timestamp
-        if block.timestamp <= previous_block_timestamp - sync_tolerance:
-            print(f"[PoW VALIDATE] Block timestamp {block.timestamp} is not greater than previous {previous_block_timestamp}")
+        # If parent exists, validate against parent's index/timestamp
+        # If parent doesn't exist (except for genesis), block is orphaned
+        if block.block_index == 0:
+            # Genesis block - special validation
+            pass
+        elif block.previous_hash == "0" * 64:
+            # Genesis parent hash - invalid for non-genesis blocks
+            print(f"[PoW VALIDATE] Non-genesis block has genesis parent hash")
             return False
+        elif parent_block:
+            # Parent found - validate against parent
+            if block.block_index != parent_block.block_index + 1:
+                print(f"[PoW VALIDATE] Block index {block.block_index} should be {parent_block.block_index + 1} (parent index + 1)")
+                return False
+            if block.timestamp <= parent_block.timestamp - sync_tolerance:
+                print(f"[PoW VALIDATE] Block timestamp {block.timestamp} is not greater than parent {parent_block.timestamp}")
+                return False
+        else:
+            # Parent not found - this is an orphan block (will be stored for later)
+            # Don't validate index/timestamp constraints since we don't know the parent
+            print(f"[PoW VALIDATE] Parent block not found - treating as orphan (will validate when parent arrives)")
+            # Still validate other constraints (size, PoW) - orphan blocks are stored and validated later
         
         # Validate block size (Bitcoin consensus rule)
         if not self.validate_block_size(block):

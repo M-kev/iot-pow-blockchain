@@ -191,7 +191,7 @@ class BlockchainNode:
             if any(b.hash == block.hash for b in self.blocks):
                 print(f"[HANDLE BLOCK] Block {block.hash} already exists in chain.")
                 # Still validate to track metrics, but skip adding to chain
-                self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
+                self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index, all_stored_blocks=all_stored_blocks)
                 return
             
             # Check if this is an orphan block - check parent against ALL stored blocks, not just last one
@@ -219,12 +219,13 @@ class BlockchainNode:
             if not parent_exists and not is_next_block and not is_competing_block and block.previous_hash != "0" * 64:  # Genesis parent hash
                 if self.pow.handle_orphan_block(block, all_stored_blocks):
                     print(f"[HANDLE BLOCK] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent not found)")
-                    # Still validate to track metrics for orphan handling
-                    self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
+                    # Still validate to track metrics for orphan handling (but skip index/timestamp validation)
+                    self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index, all_stored_blocks=all_stored_blocks)
                     return
             
             # Validate block and proceed if valid
-            valid = self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
+            # Pass all_stored_blocks so validation can check parent in any fork, not just current chain
+            valid = self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index, sync_tolerance=0.0, all_stored_blocks=all_stored_blocks)
         if valid:
             print(f"[HANDLE BLOCK] Block {block.hash} validation successful.")
             
