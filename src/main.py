@@ -184,6 +184,9 @@ class BlockchainNode:
         # Check energy metrics before validation
         energy_metrics = self.energy_monitor.get_system_metrics()
         
+        # Get all blocks from storage early - needed for validation and parent checks
+        all_stored_blocks = self.storage.get_blocks()
+        
         # Always monitor validation for metrics tracking, even if block already exists or is orphan
         # This ensures all nodes record validation attempts
         with self.metrics.monitor_operation('block_validation', f"validate-{block.block_index}-{block.hash[:8]}"):
@@ -195,8 +198,6 @@ class BlockchainNode:
                 return
             
             # Check if this is an orphan block - check parent against ALL stored blocks, not just last one
-            # Get all blocks from storage to check comprehensively
-            all_stored_blocks = self.storage.get_blocks()
             parent_exists = any(b.hash == block.previous_hash for b in all_stored_blocks)
             
             # Also check if this could be the next sequential block (most common case)
