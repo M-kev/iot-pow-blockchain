@@ -1,268 +1,116 @@
-# Energy-Efficient PoW Blockchain for IoT
+## Benchmark & Scalability Toolkit
 
-This project implements a Proof of Work (PoW) blockchain system optimized for IoT devices, particularly Raspberry Pi. The system uses MQTT for device communication and implements various energy optimization techniques with mathematical models for performance and energy consumption.
+This folder contains a reproducible test plan to stress the IoT DPoS blockchain and generate a merged report. It includes network impairment profiles, an MQTT load generator, CSV collectors, and a report generator.
 
-## Features
-
-- Proof of Work consensus mechanism with difficulty adjustment
-- MQTT-based device communication
-- Energy monitoring and optimization
-- Raspberry Pi specific optimizations
-- Bitcoin-style consensus rules (longest chain, fork resolution, probabilistic finality)
-- Real-time dashboard for monitoring
-- Mathematical models for performance prediction
-
-## Architecture
-
-### 1. **Blockchain Core**
-   - PoW consensus implementation with mathematical models
-   - Block mining and validation
-   - Transaction processing
-   - Energy monitoring and performance modeling
-
-### 2. **MQTT Communication Layer**
-   - Device discovery and registration
-   - Real-time block and transaction propagation
-   - Network status monitoring
-   - Miner status broadcasting
-
-### 3. **Energy Management**
-   - Real-time power consumption tracking
-   - Temperature monitoring
-   - CPU and memory usage optimization
-   - Power-aware mining decisions
-
-### 4. **Monitoring Dashboard**
-   - Real-time blockchain metrics
-   - Network node status
-   - Energy consumption analytics
-   - Mining difficulty and hash rate tracking
-
-## Mathematical Models
-
-### Expected Block Time
-```
-E[Tblock] = (difficulty × 2^32) / hash_rate
-```
-Where:
-- `difficulty`: Current mining difficulty
-- `2^32`: Maximum nonce value
-- `hash_rate`: Network hash rate (hashes per second)
-
-### Transaction Throughput
-```
-TPS = min(tx_per_block / E[Tblock], tx_arrival_rate)
-```
-Where:
-- `tx_per_block`: Number of transactions per block
-- `E[Tblock]`: Expected block time
-- `tx_arrival_rate`: Transaction arrival rate
-
-### Energy Consumption
-```
-Eblock = power_draw × E[Tblock]
-Etotal = Σ (from i=1 to k) Eblock_i
-```
-Where:
-- `power_draw`: Power consumption in watts
-- `E[Tblock]`: Expected block time
-- `Etotal`: Total energy over k blocks
-
-## Bitcoin Consensus Rules
-
-### 1. **Consensus Rules (Protocol Standards)**
-- Block size limit (1MB like Bitcoin)
-- Valid block structure validation
-- Valid transaction format verification
-
-### 2. **Proof of Work as Common Metric**
-- SHA-256 cryptographic puzzle
-- Difficulty adjustment based on block times
-- Work calculation for chain comparison
-
-### 3. **Longest Chain Rule (Most Work)**
-- Chain selection based on cumulative proof-of-work
-- Work-based chain comparison, not length-based
-- Automatic chain switching to best chain
-
-### 4. **Temporary Forks and Resolution**
-- Automatic fork detection and resolution
-- Chain switching to chain with most work
-- Orphan block handling
-
-### 5. **Probabilistic Finality**
-- 6-confirmation rule for transaction finality
-- Block confirmation counting
-- Reorganization protection
-
-## Installation
+### Contents
+- `config/nodes.yaml` — node list, broker and topics
+- `netem/netem.sh` — apply/clear latency/jitter/loss profiles
+- `load/mqtt_load.py` — synthetic metrics + transaction load via MQTT
+- `collect/pull_csvs.py` — pulls CSVs from each node dashboard
+- `report/generate_report.py` — merges CSVs and outputs KPIs + HTML
+- `run_test_plan.sh` — orchestrates a full test run
 
 ### Prerequisites
-- Python 3.8+
-- Raspberry Pi (recommended) or Linux system
-- MQTT broker (Mosquitto recommended)
-
-### Setup
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd pow-iot-blockchain
+1) Python deps (from repo root):
 ```
-
-2. Install dependencies:
-```bash
 pip install -r requirements.txt
 ```
-
-3. Configure environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
+2) System tools:
+- `tc`/`netem` (Linux):
+```
+sudo apt-get update && sudo apt-get install -y iproute2
+```
+- `yq` (for YAML reads in the orchestrator):
+```
+sudo snap install yq
+# or see https://github.com/mikefarah/yq for other install methods
+```
+3) Make scripts executable (once):
+```
+chmod +x tools/netem/netem.sh tools/run_test_plan.sh
 ```
 
-4. Start MQTT broker:
-```bash
-sudo systemctl start mosquitto
+### Configure Nodes & Broker
+Edit `tools/config/nodes.yaml` to match your deployment (IPs and dashboard ports):
+```
+nodes:
+  - id: pi_node_1
+    ip: 192.168.2.11
+    dashboard_port: 8081
+  # ...
+mqtt:
+  host: 192.168.2.10
+  port: 1883
+  username: broker1
+  password: broker1pass
+topics:
+  metrics: iot/metrics
+  transactions: iot/transactions
 ```
 
-## Usage
+### Quick Start (Full Orchestrated Run)
+From repo root:
+```
+./tools/run_test_plan.sh <profile> <duration_sec> <msgs_per_sec_per_publisher> <num_sim_nodes>
 
-### Starting a Node
-```bash
-# Set node ID
-export NODE_ID=pi_node_1
+# Examples
+./tools/run_test_plan.sh baseline 300 20 10
+./tools/run_test_plan.sh moderate 600 15 25
+./tools/run_test_plan.sh harsh 120 80 10
+```
+- Profiles: `baseline` | `moderate` | `harsh` | `clear`
+- The script: applies netem → runs MQTT load → collects CSVs → merges and writes a report → clears netem
 
-# Start the blockchain node
-python src/main.py
+Artifacts are written to:
+```
+artifacts/<timestamp>/
+  raw/       # per-node CSVs
+  merged/    # merged CSVs + kpis.csv
+  report.html
 ```
 
-### Accessing Dashboard
-Open your browser and navigate to:
-- Node 1: http://localhost:8001
-- Node 2: http://localhost:8002
-- Node 3: http://localhost:8003
-- etc.
+### What Is Measured
+- Block metrics: interval, consensus time, power usage (from `block_metrics` table)
+- Tx lifecycle: received vs. included timestamps and latency (from `transaction_lifecycle`)
+- KPIs: blocks_total, block_interval_avg/p95, consensus_time_avg, energy_cumulative,
+  tx_latency_avg/p95, tx_pending, tx_total
 
-### Configuration
-Edit `config/network_config.py` to configure:
-- Node IP addresses
-- Dashboard ports
-- MQTT broker settings
-- Network parameters
-
-## Network Configuration
-
-### Node Setup
-The system supports multiple Raspberry Pi nodes:
-- `pi_node_1` through `pi_node_6`
-- Each node runs independently
-- Automatic peer discovery and synchronization
-
-### MQTT Topics
-- `blocks`: Block propagation
-- `transactions`: Transaction broadcasting
-- `metrics`: System metrics sharing
-- `network/status`: Network status updates
-- `miner/status`: Mining status updates
-
-## Energy Efficiency Features
-
-- Mathematical models for energy consumption and performance
-- Dynamic difficulty adjustment based on network hash rate
-- Expected block time calculation: E[Tblock] = (difficulty × 2^32) / hash_rate
-- Transaction throughput optimization: TPS = min(tx_per_block / E[Tblock], tx_arrival_rate)
-- Energy per block calculation: Eblock = power_draw × E[Tblock]
-- Optimized mining for low-power devices
-- Smart resource allocation
-- Power-aware scheduling
-
-## Testing
-
-### Run PoW Tests
-```bash
-python test_pow.py
+### Run Components Manually
+1) Apply (or clear) a network profile:
+```
+tools/netem/netem.sh eth0 moderate
+tools/netem/netem.sh eth0 clear
+```
+2) Start load only:
+```
+python3 tools/load/mqtt_load.py \
+  --host 192.168.2.10 --port 1883 \
+  --metrics_topic iot/metrics --tx_topic iot/transactions \
+  --username broker1 --password broker1pass \
+  --nodes 10 --rate 20 --duration 300
+```
+3) Collect CSVs from nodes listed in `nodes.yaml`:
+```
+python3 tools/collect/pull_csvs.py --config tools/config/nodes.yaml --out artifacts/raw
+```
+4) Merge + generate report:
+```
+python3 tools/report/generate_report.py --in artifacts/raw --out artifacts
 ```
 
-### Run Bitcoin Consensus Tests
-```bash
-python test_bitcoin_consensus.py
+### Tips & Troubleshooting
+- Ensure each node dashboard is reachable at `http://<ip>:<port>/api/export/...`
+- If a run is interrupted, always clear shaping:
 ```
-
-### Test Network
-```bash
-# Start multiple nodes in different terminals
-export NODE_ID=pi_node_1 && python src/main.py
-export NODE_ID=pi_node_2 && python src/main.py
-export NODE_ID=pi_node_3 && python src/main.py
+tools/netem/netem.sh eth0 clear
 ```
+- Time sync matters for latency: run NTP/chrony on all nodes
+- Broker auth must match `nodes.yaml` credentials
+- To increase drain rate of pending TXs during tests, you can raise per-block TX limit in the node code (not required for this toolkit)
 
-## Monitoring
+### Extending
+- Add more profiles to `netem.sh`
+- Replace the Python load with `emqtt-bench` or HiveMQ `mqtt-benchmark` if higher throughput is desired
+- Enhance `generate_report.py` to plot charts (matplotlib/plotly) or export to Markdown/PDF
 
-### Dashboard Features
-- Real-time blockchain metrics
-- Network node status with online/offline indicators
-- Mining difficulty and hash rate tracking
-- Chain work and orphan block monitoring
-- Individual node performance metrics
-- Energy consumption analytics
 
-### Metrics Tracked
-- Block count and blockchain size
-- Transaction throughput (TPS)
-- Mining difficulty and hash rates
-- Power consumption and temperature
-- CPU and memory usage
-- Network synchronization status
-
-## Security Features
-
-### Cryptographic Security
-- SHA-256 hash function for PoW
-- Block hash verification
-- Transaction integrity checks
-- Chain validation
-
-### Network Security
-- Independent block verification by all nodes
-- Fork resolution and chain switching
-- Orphan block handling
-- Consensus rule enforcement
-
-### Economic Security
-- Proof-of-work difficulty adjustment
-- 6-confirmation finality rule
-- Reorganization protection
-- Attack resistance through computational work
-
-## Performance Optimization
-
-### IoT Device Optimization
-- Lightweight MQTT communication
-- Efficient block validation
-- Power-aware mining decisions
-- Resource usage monitoring
-
-### Network Optimization
-- Automatic peer discovery
-- Efficient block propagation
-- Fork resolution algorithms
-- Chain synchronization
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Bitcoin whitepaper and consensus rules
-- MQTT protocol for IoT communication
-- Raspberry Pi community for hardware optimization
-- Energy efficiency research in blockchain systems 

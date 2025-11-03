@@ -25,8 +25,8 @@ mqtt:
   password: broker1pass
 
 topics:
-  metrics: iot/metrics
-  transactions: iot/transactions
+  metrics: metrics
+  transactions: transactions
 
 defaults:
   qos: 1
