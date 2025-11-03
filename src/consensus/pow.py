@@ -365,13 +365,16 @@ class ProofOfWork:
         print(f"[PoW] Max nonce: {self.max_nonce}")
         
         # Create block template
+        # CRITICAL: Store original energy_metrics for later (needed for hash validation)
+        original_energy_metrics = block_data['energy_metrics'].copy()
+        
         block_template = {
             'block_index': block_data['block_index'],
             'timestamp': block_data['timestamp'],
             'transactions': block_data['transactions'],
             'previous_hash': block_data['previous_hash'],
             'miner': block_data.get('miner', block_data.get('validator', 'unknown')),
-            'energy_metrics': block_data['energy_metrics'],
+            'energy_metrics': original_energy_metrics,  # Only original metrics for mining hash
             'difficulty': self.difficulty,
             'nonce': 0
         }
@@ -408,22 +411,28 @@ class ProofOfWork:
                 energy_per_block = power_draw * mining_time  # Use actual mining time, not expected time
                 
                 # Create the mined block
+                # CRITICAL: Store original_energy_metrics separately for hash validation
+                # The Block needs to reconstruct the mining template hash
+                full_energy_metrics = {
+                    **block_template['energy_metrics'],
+                    'mining_time': mining_time,
+                    'difficulty': self.difficulty,
+                    'nonce': nonce,
+                    'hash_rate': self.network_hash_rate,
+                    'power_usage': power_draw,  # Power draw during mining
+                    'energy_per_block': energy_per_block,  # Energy consumed for this block
+                    'expected_block_time': self.calculate_expected_block_time(),
+                    # Store original metrics to recreate mining template
+                    '__original_metrics__': original_energy_metrics
+                }
+                
                 mined_block = Block(
                     block_index=block_template['block_index'],
                     timestamp=block_template['timestamp'],
                     transactions=block_template['transactions'],
                     previous_hash=block_template['previous_hash'],
                     miner=block_template['miner'],
-                    energy_metrics={
-                        **block_template['energy_metrics'],
-                        'mining_time': mining_time,
-                        'difficulty': self.difficulty,
-                        'nonce': nonce,
-                        'hash_rate': self.network_hash_rate,
-                        'power_usage': power_draw,  # Power draw during mining
-                        'energy_per_block': energy_per_block,  # Energy consumed for this block
-                        'expected_block_time': self.calculate_expected_block_time()
-                    }
+                    energy_metrics=full_energy_metrics
                 )
                 
                 # Validate block size (Bitcoin consensus rule)
@@ -530,18 +539,23 @@ class ProofOfWork:
     
     def _validate_proof_of_work(self, block: Block) -> bool:
         """Validate the proof of work for a block."""
-        # CRITICAL: Must match mining template structure exactly
-        # difficulty/nonce are at top level, NOT in energy_metrics during mining
-        # So we extract them from energy_metrics and put them at top level
+        # CRITICAL: Must EXACTLY match mining template structure
+        # Use __original_metrics__ if available, otherwise reconstruct
+        if '__original_metrics__' in block.energy_metrics:
+            original_metrics = block.energy_metrics['__original_metrics__']
+        else:
+            # Extract original metrics by removing fields added during mining
+            original_metrics = {k: v for k, v in block.energy_metrics.items() 
+                               if k not in ['difficulty', 'nonce', 'mining_time', 'hash_rate', 
+                                           'energy_per_block', 'expected_block_time', '__original_metrics__']}
+        
         block_data = {
             'block_index': block.block_index,
             'timestamp': block.timestamp,
             'transactions': block.transactions,
             'previous_hash': block.previous_hash,
             'miner': block.miner,
-            # energy_metrics WITHOUT difficulty/nonce (matches mining template)
-            'energy_metrics': {k: v for k, v in block.energy_metrics.items() if k not in ['difficulty', 'nonce']},
-            # difficulty/nonce at top level (matches mining template)
+            'energy_metrics': original_metrics,  # ONLY original metrics
             'difficulty': block.energy_metrics.get('difficulty', self.difficulty),
             'nonce': block.energy_metrics.get('nonce', 0)
         }

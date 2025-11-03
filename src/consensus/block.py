@@ -18,18 +18,25 @@ class Block:
         
     def calculate_hash(self) -> str:
         """Calculate the block hash using SHA-256."""
-        # CRITICAL: Must match mining hash calculation structure
-        # During mining, difficulty/nonce are at top level (not in energy_metrics yet)
-        # We need to extract them from energy_metrics and add them at top level
+        # CRITICAL: Must EXACTLY match mining template structure
+        # Use __original_metrics__ if available (from mining), otherwise reconstruct
+        if '__original_metrics__' in self.energy_metrics:
+            # This block was mined - use the original metrics that were hashed
+            original_metrics = self.energy_metrics['__original_metrics__']
+        else:
+            # This block came from network - extract original metrics by removing added fields
+            # Added fields during mining: mining_time, difficulty, nonce, hash_rate, energy_per_block, expected_block_time
+            original_metrics = {k: v for k, v in self.energy_metrics.items() 
+                               if k not in ['difficulty', 'nonce', 'mining_time', 'hash_rate', 
+                                           'energy_per_block', 'expected_block_time', '__original_metrics__']}
+        
         block_data = {
             'block_index': self.block_index,
             'timestamp': self.timestamp,
             'transactions': self.transactions,
             'previous_hash': self.previous_hash,
             'miner': self.miner,
-            # Use original energy_metrics WITHOUT difficulty/nonce
-            'energy_metrics': {k: v for k, v in self.energy_metrics.items() if k not in ['difficulty', 'nonce']},
-            # PoW-specific fields at top level (matches mining template)
+            'energy_metrics': original_metrics,  # ONLY original metrics (matches mining template)
             'difficulty': self.energy_metrics.get('difficulty', 1),
             'nonce': self.energy_metrics.get('nonce', 0)
         }
