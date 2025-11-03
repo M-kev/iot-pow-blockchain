@@ -856,7 +856,7 @@ class BlockchainNode:
                 
             await asyncio.sleep(RASPBERRY_PI_SETTINGS['metrics_interval'])
 
-            # Process pending transactions and create blocks if we're mining
+    # Process pending transactions and create blocks if we're mining
     async def _process_transactions_periodically(self):
         while True:
             # Generate test transactions periodically to simulate real blockchain activity
