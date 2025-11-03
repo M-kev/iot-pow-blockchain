@@ -301,6 +301,58 @@ class SQLiteStorage:
             print(f"[STORAGE] Error recording tx received: {e}")
             raise
 
+    def prune_orphaned_blocks(self, best_chain: List[Block], depth_to_keep: int = 10) -> int:
+        """
+        Remove blocks not in the best chain that are older than depth_to_keep blocks.
+        This prevents unbounded database growth from abandoned forks.
+        
+        Args:
+            best_chain: The current best chain (list of blocks)
+            depth_to_keep: Keep competing blocks within this many blocks of the chain tip
+        
+        Returns:
+            Number of blocks pruned
+        """
+        if not best_chain or len(best_chain) <= depth_to_keep:
+            return 0
+        
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Get hashes of blocks in the best chain
+            best_chain_hashes = {block.hash for block in best_chain}
+            
+            # Find the cutoff block index - only prune blocks older than this
+            cutoff_index = best_chain[-1].block_index - depth_to_keep
+            
+            # Get all blocks older than cutoff
+            cursor.execute('''
+                SELECT hash, block_index FROM blocks 
+                WHERE block_index <= ?
+            ''', (cutoff_index,))
+            
+            old_blocks = cursor.fetchall()
+            pruned_count = 0
+            
+            # Delete blocks not in best chain
+            for block_hash, block_index in old_blocks:
+                if block_hash not in best_chain_hashes:
+                    cursor.execute('DELETE FROM blocks WHERE hash = ?', (block_hash,))
+                    pruned_count += 1
+            
+            conn.commit()
+            conn.close()
+            
+            if pruned_count > 0:
+                print(f"[STORAGE] Pruned {pruned_count} orphaned blocks (cutoff index: {cutoff_index})")
+            
+            return pruned_count
+            
+        except Exception as e:
+            print(f"[STORAGE] Error pruning blocks: {e}")
+            return 0
+
     def get_cumulative_energy_usage(self) -> float:
         """Return sum of power_usage over all blocks from block_metrics."""
         try:

@@ -893,16 +893,23 @@ class BlockchainNode:
                 traceback.print_exc()
 
     async def _cleanup_orphan_blocks_periodically(self):
-        """Periodically clean up orphan blocks that can't be connected."""
+        """Periodically clean up orphan blocks that can't be connected and prune old forks."""
         while True:
             try:
-                # Clean up orphan blocks older than 60 seconds
+                # Clean up orphan blocks older than 60 seconds (from memory)
                 cleaned = self.pow.cleanup_old_orphans(max_age_seconds=60.0)
                 if cleaned > 0:
-                    print(f"[CLEANUP] Removed {cleaned} old orphan block(s)")
+                    print(f"[CLEANUP] Removed {cleaned} old orphan block(s) from memory")
                 
                 # Also process any pending orphans that can now be connected
                 self.blocks = self.pow.process_pending_blocks(self.blocks)
+                
+                # Prune abandoned forks from database (keep last 10 blocks worth of competing chains)
+                # This prevents unbounded database growth
+                if len(self.blocks) > 15:  # Only prune if chain is long enough
+                    pruned = self.storage.prune_orphaned_blocks(self.blocks, depth_to_keep=10)
+                    if pruned > 0:
+                        print(f"[CLEANUP] Pruned {pruned} orphaned block(s) from database")
                 
             except Exception as e:
                 print(f"[CLEANUP] Error cleaning up orphan blocks: {e}")
