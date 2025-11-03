@@ -681,7 +681,7 @@ async def export_operation_metrics_csv(operation_type: Optional[str] = None):
             ]
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=fn, extrasaction='ignore')
-    writer.writeheader()
+        writer.writeheader()
         return StreamingResponse(io.StringIO(buf.getvalue()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=operation-metrics.csv"})
 
 if __name__ == "__main__":
