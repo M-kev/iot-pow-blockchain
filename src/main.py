@@ -1002,10 +1002,10 @@ class BlockchainNode:
                     self.blocks = best_chain
                 else:
                     # Our mined block is part of the best chain, add it
-                self.blocks.append(new_block)
+                    self.blocks.append(new_block)
             
-                # Persist per-block analytics
-                try:
+            # Persist per-block analytics
+            try:
                 # For genesis block, set interval to 0 to avoid unrealistic values
                 if new_block.block_index == 0:
                     interval = 0.0
@@ -1014,22 +1014,22 @@ class BlockchainNode:
                     consensus_time = new_block.energy_metrics.get('consensus_time', 0)
                     power_usage = new_block.energy_metrics.get('power_usage', 0)
                     self.storage.save_block_metrics(new_block.block_index, new_block.timestamp, interval, consensus_time, power_usage)
-                except Exception as e:
-                    print(f"[ANALYTICS] Failed saving block metrics for local block {new_block.block_index}: {e}")
-                print(f"[PROCESS TX] Block {new_block.hash} added to local chain and saved.")
+            except Exception as e:
+                print(f"[ANALYTICS] Failed saving block metrics for local block {new_block.block_index}: {e}")
+            print(f"[PROCESS TX] Block {new_block.hash} added to local chain and saved.")
 
-                # Record metrics for charts
-                self.metrics.record_block_time(new_block.timestamp - previous_block_timestamp)
-                self.metrics.record_consensus_time(new_block.energy_metrics.get('consensus_time', 0))
+            # Record metrics for charts
+            self.metrics.record_block_time(new_block.timestamp - previous_block_timestamp)
+            self.metrics.record_consensus_time(new_block.energy_metrics.get('consensus_time', 0))
 
             # Publish mining status
             self.mqtt_client.publish_miner_status({
-                    'node_id': self.node_id,
-                    'block_count': len(self.blocks),
+                'node_id': self.node_id,
+                'block_count': len(self.blocks),
                 'hash_rate': self.pow.network_hash_rate,
                 'difficulty': self.pow.difficulty,
                 'mining_time': new_block.energy_metrics.get('mining_time', 0)
-                })
+            })
 
             # Clear processed transactions (only if there were any)
             if self.pending_transactions:
