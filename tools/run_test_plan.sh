@@ -18,10 +18,34 @@ echo "[Orchestrator] Using profile=$PROFILE duration=$DURATION rate=$RATE nodes=
 $ROOT/tools/netem/netem.sh eth0 "$PROFILE"
 
 # 2) Start load
-HOST=$(yq '.mqtt.host' "$CFG"); PORT=$(yq '.mqtt.port' "$CFG")
-USER=$(yq '.mqtt.username' "$CFG"); PASS=$(yq '.mqtt.password' "$CFG")
-MTOP=$(yq '.topics.metrics' "$CFG"); TTOP=$(yq '.topics.transactions' "$CFG")
+# Parse YAML config using Python (more reliable than yq)
+read HOST PORT USER PASS MTOP TTOP <<< $(python3 <<PYEOF
+import yaml
+import sys
+try:
+    with open("$CFG", 'r') as f:
+        cfg = yaml.safe_load(f)
+    mqtt = cfg.get('mqtt', {})
+    topics = cfg.get('topics', {})
+    host = mqtt.get('host', '')
+    port = mqtt.get('port', 1883)
+    user = mqtt.get('username', '')
+    passwd = mqtt.get('password', '')
+    mtop = topics.get('metrics', 'metrics')
+    ttop = topics.get('transactions', 'transactions')
+    print(f"{host} {port} {user} {passwd} {mtop} {ttop}")
+except Exception as e:
+    print(f"ERROR loading config: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+)
 
+if [ -z "$HOST" ]; then
+    echo "ERROR: Failed to read MQTT broker configuration from $CFG" >&2
+    exit 1
+fi
+
+echo "[Orchestrator] MQTT Broker: $HOST:$PORT"
 python3 "$ROOT/tools/load/mqtt_load.py" --host "$HOST" --port "$PORT" \
   --username "$USER" --password "$PASS" \
   --metrics_topic "$MTOP" --tx_topic "$TTOP" \

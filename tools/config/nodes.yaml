@@ -19,7 +19,7 @@ nodes:
     dashboard_port: 8006
 
 mqtt:
-  host: 192.168.2.10
+  host: 192.168.2.11
   port: 1883
   username: broker1
   password: broker1pass
