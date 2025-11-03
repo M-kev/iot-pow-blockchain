@@ -15,7 +15,10 @@ class GenesisBlock:
             "pi_node_5",
             "pi_node_6"
         ]
-        self.fixed_timestamp = int(time.time())  # Use current timestamp for realistic intervals
+        # Use a FIXED timestamp for genesis block to ensure all nodes have the same block
+        # This is critical for consensus - all nodes must have identical genesis blocks
+        # Using a fixed date: 2024-01-01 00:00:00 UTC
+        self.fixed_timestamp = 1704067200  # Fixed timestamp: Jan 1, 2024 00:00:00 UTC
         self.initial_difficulty = 1  # Initial mining difficulty for PoW
         
     def create_genesis_block(self) -> Block:

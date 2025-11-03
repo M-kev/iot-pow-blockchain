@@ -154,6 +154,33 @@ class BlockchainNode:
             previous_block_timestamp = 0.0
             previous_block_index = -1
 
+        # CRITICAL: For genesis block (index 0), verify it matches expected genesis format
+        # All nodes MUST have the same genesis block for consensus to work
+        if block.block_index == 0:
+            genesis_verifier = GenesisBlock()
+            expected_genesis = genesis_verifier.create_genesis_block()
+            # Check if received genesis matches expected genesis (must have same hash)
+            if block.hash != expected_genesis.hash:
+                print(f"[HANDLE BLOCK] ERROR: Received genesis block has different hash!")
+                print(f"  Received: {block.hash}")
+                print(f"  Expected: {expected_genesis.hash}")
+                print(f"  Rejecting incompatible genesis block - this node will remain out of sync.")
+                return
+            # If we don't have a genesis block yet, use the received one (they should match)
+            if not self.blocks:
+                print(f"[HANDLE BLOCK] Accepting valid genesis block from network.")
+                self.blocks.append(block)
+                self.storage.save_block(block)
+                return
+            # If we already have genesis, verify they match
+            elif self.blocks[0].hash != block.hash:
+                print(f"[HANDLE BLOCK] WARNING: Local genesis block differs from network genesis!")
+                print(f"  Local: {self.blocks[0].hash}")
+                print(f"  Network: {block.hash}")
+                print(f"  This indicates nodes were initialized at different times. Chain may be incompatible.")
+                # For now, reject the conflicting genesis. Nodes should be reset with same genesis.
+                return
+
         # Check energy metrics before validation
         energy_metrics = self.energy_monitor.get_system_metrics()
         

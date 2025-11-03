@@ -21,15 +21,18 @@ sudo systemctl daemon-reload
 
 # Remove blockchain data directories
 echo "🗂️  Removing blockchain data directories..."
-rm -rf ~/iot-pow-blockchain/data/blockchain_*.db
-rm -rf ~/iot-pow-blockchain/blockchain_data
-rm -rf ~/iot-pow-blockchain/static
-rm -rf ~/iot-pow-blockchain/logs
+sudo rm -rf ~/iot-pow-blockchain/data/blockchain_*.db
+sudo rm -rf ~/iot-pow-blockchain/blockchain_data
+sudo rm -rf ~/iot-pow-blockchain/static
+sudo rm -rf ~/iot-pow-blockchain/logs
 
 # Remove SQLite databases (node-specific and general)
 echo "🗄️  Removing SQLite databases..."
-rm -f ~/iot-pow-blockchain/data/blockchain.db
-rm -f ~/iot-pow-blockchain/data/blockchain_*.db
+# Remove root-level blockchain.db (main database)
+sudo rm -f ~/iot-pow-blockchain/blockchain.db
+# Remove data directory databases
+sudo rm -f ~/iot-pow-blockchain/data/blockchain.db
+sudo rm -f ~/iot-pow-blockchain/data/blockchain_*.db
 
 # Remove any temporary files
 echo "🗑️  Cleaning temporary files..."
