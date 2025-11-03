@@ -260,10 +260,30 @@ class BlockchainNode:
             best_chain = self.pow.resolve_forks(all_blocks)
             
             # Check if we need to switch to a better chain
-            if len(best_chain) > len(self.blocks) or self.pow.calculate_chain_work(best_chain) > self.pow.calculate_chain_work(self.blocks):
-                print(f"[HANDLE BLOCK] Switching to better chain: {len(best_chain)} blocks with {self.pow.calculate_chain_work(best_chain)} work")
+            current_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
+            best_work = self.pow.calculate_chain_work(best_chain) if best_chain else 0
+            
+            should_switch = False
+            if not best_chain:
+                should_switch = False
+            elif len(best_chain) > len(self.blocks):
+                should_switch = True
+            elif best_work > current_work:
+                should_switch = True
+            elif best_work == current_work and len(best_chain) == len(self.blocks) and len(self.blocks) > 0:
+                # Same work and length - use deterministic tie-breaker (lowest tip hash)
+                if best_chain[-1].hash < self.blocks[-1].hash:
+                    should_switch = True
+                elif best_chain[-1].hash != self.blocks[-1].hash:
+                    # Different tips with same work/length - should switch to deterministic choice
+                    should_switch = True
+            
+            if should_switch:
+                print(f"[HANDLE BLOCK] Switching to better chain: {len(best_chain)} blocks with {best_work} work")
+                print(f"  Old chain tip: {self.blocks[-1].hash[:16] if self.blocks else 'none'}...")
+                print(f"  New chain tip: {best_chain[-1].hash[:16]}...")
                 self.blocks = best_chain
-                # Update storage with the best chain
+                # Ensure all blocks from best chain are saved
                 for block in best_chain:
                     _db_start2 = time.time()
                     self.storage.save_block(block)
@@ -514,13 +534,36 @@ class BlockchainNode:
                             print(f"[SYNC] Error processing block from {peer['id']}: {e}")
                             continue
                     
-                    # Resolve forks and get the best chain
-                    best_chain = self.pow.resolve_forks(all_blocks)
+                    # Resolve forks and get the best chain from ALL stored blocks
+                    all_local_blocks = self.storage.get_blocks()
+                    best_chain = self.pow.resolve_forks(all_local_blocks)
                     
-                    # Update local chain if we found a better one
-                    if len(best_chain) > len(self.blocks) or self.pow.calculate_chain_work(best_chain) > self.pow.calculate_chain_work(self.blocks):
-                        print(f"[SYNC] Switching to better chain from {peer['id']}: {len(best_chain)} blocks with {self.pow.calculate_chain_work(best_chain)} work")
+                    # Check if we need to switch to better chain (using same logic as _handle_new_block)
+                    current_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
+                    best_work = self.pow.calculate_chain_work(best_chain) if best_chain else 0
+                    
+                    should_switch = False
+                    if best_chain:
+                        if len(best_chain) > len(self.blocks):
+                            should_switch = True
+                        elif best_work > current_work:
+                            should_switch = True
+                        elif best_work == current_work and len(best_chain) == len(self.blocks) and len(self.blocks) > 0:
+                            # Use tie-breaker: lowest tip hash
+                            if best_chain[-1].hash < self.blocks[-1].hash:
+                                should_switch = True
+                            elif best_chain[-1].hash != self.blocks[-1].hash:
+                                # Different tips - switch to deterministic choice
+                                should_switch = True
+                    
+                    if should_switch:
+                        print(f"[SYNC] Switching to better chain from {peer['id']}: {len(best_chain)} blocks with {best_work} work")
+                        print(f"  Old tip: {self.blocks[-1].hash[:16] if self.blocks else 'none'}...")
+                        print(f"  New tip: {best_chain[-1].hash[:16]}...")
                         self.blocks = best_chain
+                        # Ensure all blocks from best chain are saved
+                        for block in best_chain:
+                            self.storage.save_block(block)
                     else:
                         print(f"[SYNC] Local chain is better: {len(self.blocks)} blocks with {self.pow.calculate_chain_work(self.blocks)} work")
                     
@@ -658,6 +701,34 @@ class BlockchainNode:
             else:
                 print(f"[PROCESS TX] Time to mine a block for {self.node_id}.")
 
+            # CRITICAL: Before mining, ensure we're building on the best chain
+            # Resolve forks to get the best chain from all stored blocks
+            all_stored_for_mining = self.storage.get_blocks()
+            best_chain_for_mining = self.pow.resolve_forks(all_stored_for_mining)
+            if best_chain_for_mining:
+                current_work_mining = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
+                best_work_mining = self.pow.calculate_chain_work(best_chain_for_mining)
+                
+                # Switch to best chain if it's better
+                should_use_best = False
+                if len(best_chain_for_mining) > len(self.blocks):
+                    should_use_best = True
+                elif best_work_mining > current_work_mining:
+                    should_use_best = True
+                elif best_work_mining == current_work_mining and len(best_chain_for_mining) == len(self.blocks) and len(self.blocks) > 0:
+                    # Use tie-breaker: lowest tip hash (deterministic)
+                    if best_chain_for_mining[-1].hash < self.blocks[-1].hash:
+                        should_use_best = True
+                    elif best_chain_for_mining[-1].hash != self.blocks[-1].hash:
+                        # Different tips - use best chain from fork resolution
+                        should_use_best = True
+                
+                if should_use_best and best_chain_for_mining[-1].hash != (self.blocks[-1].hash if self.blocks else ""):
+                    print(f"[PROCESS TX] Before mining: switching to best chain ({len(best_chain_for_mining)} blocks, {best_work_mining} work)")
+                    print(f"  Old tip: {self.blocks[-1].hash[:16] if self.blocks else 'none'}...")
+                    print(f"  New tip: {best_chain_for_mining[-1].hash[:16]}...")
+                    self.blocks = best_chain_for_mining
+            
             # In PoW, we can mine blocks even without transactions (like Bitcoin)
             # This ensures continuous block production and network security
             start_time = time.time()
@@ -780,26 +851,42 @@ class BlockchainNode:
                     
                     current_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
                     best_work = self.pow.calculate_chain_work(best_chain)
+                    current_tip = self.blocks[-1].hash if self.blocks else ""
+                    best_tip = best_chain[-1].hash if best_chain else ""
                     
                     # Switch if we found a better chain (more work, or same work but deterministic tie-breaker)
                     should_switch = False
                     if len(best_chain) > len(self.blocks):
                         should_switch = True
+                        print(f"[FORK RESOLUTION] Better chain found: longer ({len(best_chain)} > {len(self.blocks)})")
                     elif best_work > current_work:
                         should_switch = True
+                        print(f"[FORK RESOLUTION] Better chain found: more work ({best_work} > {current_work})")
                     elif best_work == current_work and len(best_chain) == len(self.blocks) and len(self.blocks) > 0:
                         # Same work and length - use deterministic tie-breaker (lowest tip hash)
-                        if best_chain[-1].hash < self.blocks[-1].hash:
+                        if best_tip < current_tip:
                             should_switch = True
+                            print(f"[FORK RESOLUTION] Better chain found: tie-breaker (tip {best_tip[:16]}... < {current_tip[:16]}...)")
+                        elif best_tip != current_tip:
+                            # Different tips but we should use the one from fork resolution (deterministic)
+                            should_switch = True
+                            print(f"[FORK RESOLUTION] Better chain found: different tip, using deterministic choice")
                     
-                    if should_switch:
+                    if should_switch and best_tip != current_tip:
                         print(f"[FORK RESOLUTION] Switching to better chain: {len(best_chain)} blocks with {best_work} work")
-                        print(f"  Old tip: {self.blocks[-1].hash[:16] if self.blocks else 'none'}...")
-                        print(f"  New tip: {best_chain[-1].hash[:16]}...")
+                        print(f"  Old tip: {current_tip[:16] if current_tip else 'none'}...")
+                        print(f"  New tip: {best_tip[:16]}...")
+                        print(f"  Old chain blocks: {[b.block_index for b in self.blocks]}")
+                        print(f"  New chain blocks: {[b.block_index for b in best_chain]}")
                         self.blocks = best_chain
                         # Ensure all blocks from best chain are saved
                         for block in best_chain:
                             self.storage.save_block(block)
+                    elif best_tip == current_tip:
+                        # Already on best chain
+                        pass
+                    else:
+                        print(f"[FORK RESOLUTION] Current chain is best: {len(self.blocks)} blocks, {current_work} work")
             except Exception as e:
                 print(f"[FORK RESOLUTION] Error during periodic fork resolution: {e}")
                 import traceback

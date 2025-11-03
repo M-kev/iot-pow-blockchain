@@ -120,9 +120,20 @@ class ProofOfWork:
         return best_chain
     
     def _build_all_chains(self, blocks: List[Block]) -> List[List[Block]]:
-        """Build all possible chains from the given blocks."""
+        """Build all possible chains from the given blocks. Only includes complete chains from genesis."""
+        if not blocks:
+            return []
+        
         # Create a map of block hash to block
         block_map = {block.hash: block for block in blocks}
+        
+        # Find genesis block(s) - blocks with previous_hash = "0"*64 or block_index = 0
+        genesis_blocks = [b for b in blocks if b.block_index == 0 or b.previous_hash == "0" * 64]
+        
+        # If no genesis found, return empty (invalid state)
+        if not genesis_blocks:
+            print("[PoW] WARNING: No genesis block found in blocks!")
+            return []
         
         # Find all chain tips (blocks with no children)
         tips = set(block.hash for block in blocks)
@@ -135,15 +146,27 @@ class ProofOfWork:
         for tip_hash in tips:
             chain = []
             current_hash = tip_hash
+            visited = set()  # Prevent cycles
             
-            while current_hash in block_map:
+            while current_hash in block_map and current_hash not in visited:
+                visited.add(current_hash)
                 block = block_map[current_hash]
                 chain.append(block)
+                
+                # Stop if we reached genesis
+                if block.block_index == 0 or block.previous_hash == "0" * 64:
+                    break
+                    
                 current_hash = block.previous_hash
             
-            # Reverse to get genesis to tip order
-            chain.reverse()
-            chains.append(chain)
+            # Only include chains that start from genesis (block_index 0)
+            if chain and chain[-1].block_index == 0:
+                # Reverse to get genesis to tip order
+                chain.reverse()
+                chains.append(chain)
+            elif chain:
+                # Chain doesn't connect to genesis - might be incomplete
+                print(f"[PoW] WARNING: Chain ending at {chain[0].hash[:16]}... doesn't connect to genesis")
         
         return chains
     
@@ -300,6 +323,18 @@ class ProofOfWork:
             is_tip = not any(b.previous_hash == block.hash for b in all_blocks)
             if is_tip:
                 self.chain_tips[block.hash] = block
+        
+        # Debug: Show all chains found
+        chains = self._build_all_chains(all_blocks)
+        if len(chains) > 1:
+            print(f"[PoW] Fork resolution: Found {len(chains)} competing chains:")
+            for i, chain in enumerate(chains):
+                chain_indices = [b.block_index for b in chain]
+                chain_work = self.calculate_chain_work(chain)
+                chain_tip = chain[-1].hash[:16] if chain else "none"
+                is_best = (chain == best_chain)
+                marker = " <-- BEST" if is_best else ""
+                print(f"  Chain {i+1}: indices {chain_indices}, work={chain_work}, tip={chain_tip}...{marker}")
         
         print(f"[PoW] Fork resolution: Best chain has {len(best_chain)} blocks with {self.calculate_chain_work(best_chain)} total work")
         
@@ -516,12 +551,25 @@ class ProofOfWork:
             print(f"[PoW VALIDATE] Hash mismatch: calculated={calculated_hash}, block={block.hash}")
             return False
         
-        # Verify hash meets target difficulty
-        target_difficulty = self.calculate_target_difficulty()
+        # CRITICAL: Verify hash meets target difficulty using the BLOCK'S difficulty, not receiver's
+        # Each block is mined with a specific difficulty, and that's what we validate against
+        block_difficulty = block.energy_metrics.get('difficulty', 1)
+        
+        # Calculate target using the block's difficulty
+        # Target = (2^240) / difficulty, constrained between 2^224 and 2^256-1
+        base_target = 2 ** 240  # Base target for difficulty 1
+        target_for_block = base_target // block_difficulty
+        
+        # Constrain target
+        min_target = 2 ** 224
+        max_target = (2 ** 256) - 1
+        target_for_block = max(min_target, min(max_target, target_for_block))
+        
         hash_int = int(calculated_hash, 16)
         
-        if hash_int >= target_difficulty:
+        if hash_int >= target_for_block:
             print(f"[PoW VALIDATE] Hash {calculated_hash} does not meet target difficulty")
+            print(f"  Block difficulty: {block_difficulty}, Target: {target_for_block}, Hash int: {hash_int}")
             return False
         
         return True
