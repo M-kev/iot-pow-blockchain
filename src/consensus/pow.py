@@ -120,7 +120,7 @@ class ProofOfWork:
         return best_chain
     
     def _build_all_chains(self, blocks: List[Block]) -> List[List[Block]]:
-        """Build all possible chains from the given blocks. Only includes complete chains from genesis."""
+        """Build all possible chains from the given blocks. Only includes complete, valid chains from genesis."""
         if not blocks:
             return []
         
@@ -163,7 +163,20 @@ class ProofOfWork:
             if chain and chain[-1].block_index == 0:
                 # Reverse to get genesis to tip order
                 chain.reverse()
-                chains.append(chain)
+                
+                # CRITICAL: Validate index continuity (each block must be parent + 1)
+                is_valid = True
+                for i in range(1, len(chain)):
+                    if chain[i].block_index != chain[i-1].block_index + 1:
+                        print(f"[PoW] WARNING: Invalid chain - index jump at position {i}: {chain[i-1].block_index} → {chain[i].block_index}")
+                        is_valid = False
+                        break
+                
+                # Only include valid chains with sequential indices
+                if is_valid:
+                    chains.append(chain)
+                else:
+                    print(f"[PoW] Rejected corrupt chain with {len(chain)} blocks (indices: {[b.block_index for b in chain[:10]]}{'...' if len(chain) > 10 else ''})")
             elif chain:
                 # Chain doesn't connect to genesis - might be incomplete
                 print(f"[PoW] WARNING: Chain ending at {chain[0].hash[:16]}... doesn't connect to genesis")

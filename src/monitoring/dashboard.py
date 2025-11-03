@@ -317,6 +317,63 @@ async def get_blocks(start_index: int = 0, end_index: int = -1) -> List[Dict[str
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving blocks: {str(e)}")
 
+@app.get("/api/blocks/diagnostic")
+async def get_blocks_diagnostic():
+    """Diagnostic endpoint to identify corrupt blocks and missing indices."""
+    if metrics is None:
+        raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
+    
+    try:
+        all_blocks = metrics.get_blocks_from_storage(0, -1)
+        
+        # Group blocks by index
+        blocks_by_index = {}
+        for block in all_blocks:
+            idx = block.block_index
+            if idx not in blocks_by_index:
+                blocks_by_index[idx] = []
+            blocks_by_index[idx].append(block)
+        
+        # Find missing indices
+        if blocks_by_index:
+            max_index = max(blocks_by_index.keys())
+            missing_indices = [i for i in range(max_index + 1) if i not in blocks_by_index]
+        else:
+            max_index = -1
+            missing_indices = []
+        
+        # Find duplicate indices
+        duplicate_indices = {idx: len(blocks) for idx, blocks in blocks_by_index.items() if len(blocks) > 1}
+        
+        # Validate parent-child relationships
+        invalid_relationships = []
+        for block in all_blocks:
+            if block.block_index > 0:
+                # Find parent
+                parent = next((b for b in all_blocks if b.hash == block.previous_hash), None)
+                if parent:
+                    if block.block_index != parent.block_index + 1:
+                        invalid_relationships.append({
+                            "block_index": block.block_index,
+                            "block_hash": block.hash[:16] + "...",
+                            "parent_index": parent.block_index,
+                            "expected_index": parent.block_index + 1
+                        })
+        
+        return {
+            "total_blocks": len(all_blocks),
+            "max_index": max_index,
+            "unique_indices": len(blocks_by_index),
+            "missing_indices": missing_indices[:20],  # First 20
+            "missing_count": len(missing_indices),
+            "duplicate_indices": duplicate_indices,
+            "invalid_relationships": invalid_relationships[:20],  # First 20
+            "invalid_count": len(invalid_relationships),
+            "is_healthy": len(missing_indices) == 0 and len(duplicate_indices) == 0 and len(invalid_relationships) == 0
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error in diagnostic: {str(e)}")
+
 @app.get("/api/consensus-protocol")
 async def get_consensus_protocol() -> Dict[str, str]:
     """Get consensus protocol information."""
