@@ -427,15 +427,20 @@ async def get_operation_metrics(operation_type: Optional[str] = None):
 async def export_resource_metrics_csv():
     if metrics is None:
         raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
+    fieldnames = [
+        "operation_id","operation_type","start_time","end_time","duration",
+        "cpu_initial","cpu_final","cpu_avg",
+        "memory_initial_mb","memory_final_mb","memory_delta_mb",
+        "network_bytes_sent","network_bytes_recv","network_packets_sent","network_packets_recv"
+    ]
     try:
-        # Only block_* operations from resource history
-        data = [r for r in metrics.get_resource_metrics().get('recent_operations', []) if str(r.get('operation_type','')).startswith('block_')]
-        fieldnames = [
-            "operation_id","operation_type","start_time","end_time","duration",
-            "cpu_initial","cpu_final","cpu_avg",
-            "memory_initial_mb","memory_final_mb","memory_delta_mb",
-            "network_bytes_sent","network_bytes_recv","network_packets_sent","network_packets_recv"
-        ]
+        # Use unlimited operation_metrics lists for block_* operations instead of limited deque
+        # This ensures we get all validation and creation metrics, not just recent ones
+        op_metrics = metrics.get_operation_metrics()
+        block_validation = op_metrics.get('block_validation', [])
+        block_creation = op_metrics.get('block_creation', [])
+        # Combine all block_* operations from unlimited lists
+        data = block_validation + block_creation
         def generate():
             buf = io.StringIO()
             writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction='ignore')

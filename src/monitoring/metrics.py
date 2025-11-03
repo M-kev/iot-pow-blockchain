@@ -39,7 +39,8 @@ class BlockchainMetrics:
         self.current_difficulty = 1  # PoW: current mining difficulty
 
         # Resource and operation metrics (IoT-DPoS parity)
-        self.resource_metrics_history: deque = deque(maxlen=100)
+        # Increased maxlen to keep more history for analysis (1000 operations)
+        self.resource_metrics_history: deque = deque(maxlen=1000)
         self.operation_metrics: Dict[str, List[Dict[str, Any]]] = {
             'block_validation': [],
             'block_creation': [],
@@ -47,10 +48,23 @@ class BlockchainMetrics:
             'database_operations': []
         }
         self._op_lock = threading.Lock()
+        self.monitoring_start_time: Optional[float] = None
+        self.monitoring_active: bool = False
+
+    def start_monitoring(self) -> None:
+        """Initialize and activate resource/operation monitoring from node startup."""
+        self.monitoring_start_time = time.time()
+        self.monitoring_active = True
+        print(f"[METRICS] Resource and operation monitoring started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.monitoring_start_time))}")
+        print(f"[METRICS] Monitoring operations: block_validation, block_creation, network_operations, database_operations")
+        print(f"[METRICS] Metrics will be recorded for all operations after this point")
 
     @contextmanager
     def monitor_operation(self, operation_type: str, operation_id: Optional[str] = None):
         """Context manager to record resource usage around an operation."""
+        if not self.monitoring_active:
+            # Auto-start monitoring if not explicitly started (backward compatibility)
+            self.start_monitoring()
         start_time = time.time()
         cpu_initial = psutil.cpu_percent(interval=None)
         mem_info_initial = psutil.virtual_memory()
@@ -186,6 +200,8 @@ class BlockchainMetrics:
         }
 
         return {
+            'monitoring_start_time': self.monitoring_start_time,
+            'monitoring_active': self.monitoring_active,
             'recent_operations': recent_ops,
             'operation_summaries': {
                 'block_validation': summarize_block_ops('block_validation'),

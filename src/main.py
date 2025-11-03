@@ -44,6 +44,8 @@ class BlockchainNode:
         db_filename = f'blockchain_{self.node_id}.db'
         self.storage = SQLiteStorage(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', db_filename))
         self.metrics = BlockchainMetrics(self.node_id, self.storage)
+        # Start monitoring from node startup
+        self.metrics.start_monitoring()
         set_metrics_instance(self.metrics)
         self.pow = ProofOfWork(target_block_time=3.0, metrics=self.metrics)
         print(f"[DEBUG] Initializing MQTT client for node: {self.node_id}")
@@ -142,18 +144,7 @@ class BlockchainNode:
         block = Block.from_dict(block_data)
         print(f"[HANDLE BLOCK] Node {self.node_id} received new block: {block.hash} (Block Index: {block.block_index})")
         
-        # Skip if we already have this block
-        if any(b.hash == block.hash for b in self.blocks):
-            print(f"[HANDLE BLOCK] Block {block.hash} already exists in chain.")
-            return
-        
-        # Check if this is an orphan block (parent not found)
-        if self.blocks and block.previous_hash != self.blocks[-1].hash:
-            if self.pow.handle_orphan_block(block):
-                print(f"[HANDLE BLOCK] Stored orphan block {block.hash} for later processing")
-                return
-        
-        # Determine previous block's details for validation
+        # Determine previous block's details for validation (needed for monitoring)
         previous_block_timestamp = self.blocks[-1].timestamp if self.blocks else 0.0
         previous_block_index = self.blocks[-1].block_index if self.blocks else -1
 
@@ -163,8 +154,26 @@ class BlockchainNode:
 
         # Check energy metrics before validation
         energy_metrics = self.energy_monitor.get_system_metrics()
-        # Monitor block validation resource usage
-        with self.metrics.monitor_operation('block_validation', f"validate-{block.block_index}"):
+        
+        # Always monitor validation for metrics tracking, even if block already exists or is orphan
+        # This ensures all nodes record validation attempts
+        with self.metrics.monitor_operation('block_validation', f"validate-{block.block_index}-{block.hash[:8]}"):
+            # Skip if we already have this block, but still record validation attempt
+            if any(b.hash == block.hash for b in self.blocks):
+                print(f"[HANDLE BLOCK] Block {block.hash} already exists in chain.")
+                # Still validate to track metrics, but skip adding to chain
+                self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
+                return
+            
+            # Check if this is an orphan block (parent not found)
+            if self.blocks and block.previous_hash != self.blocks[-1].hash:
+                if self.pow.handle_orphan_block(block):
+                    print(f"[HANDLE BLOCK] Stored orphan block {block.hash} for later processing")
+                    # Still validate to track metrics for orphan handling
+                    self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
+                    return
+            
+            # Validate block and proceed if valid
             valid = self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index)
         if valid:
             print(f"[HANDLE BLOCK] Block {block.hash} validation successful.")
