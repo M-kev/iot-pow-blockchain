@@ -30,6 +30,7 @@ from config.network_config import (
 class BlockchainNode:
     def __init__(self):
         load_dotenv()
+        self.event_loop = None  # Will be set when async start() is called
         
         # Get node configuration
         self.node_id = os.getenv('NODE_ID', 'pi_node_1')
@@ -222,7 +223,12 @@ class BlockchainNode:
                     print(f"[HANDLE BLOCK] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent {block.previous_hash[:16]}... not found)")
                     print(f"[HANDLE BLOCK] This likely means node is on a different fork. Will sync with peers to get missing parent.")
                     # Trigger async sync to fetch missing parent blocks
-                    asyncio.create_task(self._sync_for_missing_parents(block))
+                    # MQTT handlers run in thread context, so use run_coroutine_threadsafe
+                    if self.event_loop and self.event_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(self._sync_for_missing_parents(block), self.event_loop)
+                    else:
+                        # If loop not available yet, schedule when it starts
+                        print(f"[HANDLE BLOCK] Event loop not ready, will sync on next periodic sync")
                     # Still validate to track metrics for orphan handling (but skip index/timestamp validation)
                     self.pow.validate_block(block, energy_metrics['power_usage'], previous_block_timestamp, previous_block_index, all_stored_blocks=all_stored_blocks)
                     return
@@ -530,6 +536,9 @@ class BlockchainNode:
     async def start(self) -> None:
         """Start the blockchain node operations."""
         print(f"Blockchain node {self.node_id} started")
+        
+        # Store event loop reference for scheduling coroutines from MQTT handlers
+        self.event_loop = asyncio.get_event_loop()
         
         # Start dashboard in a separate thread
         self.dashboard_thread.start()
