@@ -22,16 +22,16 @@ def set_metrics_instance(metrics_instance: BlockchainMetrics):
 async def get_dashboard():
     """Serve the main dashboard HTML."""
     return """
-<!DOCTYPE html>
+    <!DOCTYPE html>
 <html lang="en">
-<head>
+    <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PoW Blockchain Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .metric-card {
-            margin-bottom: 20px;
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            .metric-card {
+                margin-bottom: 20px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             border-radius: 10px;
             transition: transform 0.2s;
@@ -42,18 +42,18 @@ async def get_dashboard():
         .card-title {
             color: #2c3e50;
             font-weight: bold;
-        }
+            }
         .card-text {
             font-size: 1.2em;
             color: #34495e;
-        }
+            }
         .node-card {
             margin-bottom: 15px;
             border-left: 4px solid #3498db;
-        }
-        .node-list-container {
+            }
+            .node-list-container {
             max-height: 300px;
-            overflow-y: auto;
+                overflow-y: auto;
         }
         .refresh-btn {
             position: fixed;
@@ -67,55 +67,55 @@ async def get_dashboard():
             border-radius: 50%;
             display: inline-block;
             margin-right: 8px;
-        }
+            }
         .status-online { background-color: #27ae60; }
         .status-offline { background-color: #e74c3c; }
-    </style>
-</head>
-<body>
+        </style>
+    </head>
+    <body>
     <div class="container-fluid mt-4">
         <h1 class="text-center mb-4">PoW Blockchain Dashboard</h1>
         
         <button class="btn btn-primary refresh-btn" onclick="refreshData()">
             <i class="bi bi-arrow-clockwise"></i> Refresh
         </button>
-
-        <div class="row">
-            <div class="col-md-6">
-                <div class="card metric-card">
-                    <div class="card-body">
-                        <h5 class="card-title">Consensus Protocol</h5>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card metric-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Consensus Protocol</h5>
                         <p class="card-text" id="consensus-protocol">Proof of Work</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card metric-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Overall Power Usage</h5>
+                            <p class="card-text" id="overall-power-usage">Loading...</p>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="col-md-6">
-                <div class="card metric-card">
-                    <div class="card-body">
-                        <h5 class="card-title">Overall Power Usage</h5>
-                        <p class="card-text" id="overall-power-usage">Loading...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
 
-        <div class="row">
+            <div class="row">
             <div class="col-md-4">
-                <div class="card metric-card">
-                    <div class="card-body">
+                    <div class="card metric-card">
+                        <div class="card-body">
                         <h5 class="card-title">Block Count</h5>
-                        <p class="card-text" id="block-count">Loading...</p>
+                            <p class="card-text" id="block-count">Loading...</p>
                     </div>
                 </div>
             </div>
             <div class="col-md-4">
-                <div class="card metric-card">
-                    <div class="card-body">
-                        <h5 class="card-title">Blockchain Size</h5>
-                        <p class="card-text" id="blockchain-size">Loading...</p>
+                    <div class="card metric-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Blockchain Size</h5>
+                            <p class="card-text" id="blockchain-size">Loading...</p>
+                        </div>
                     </div>
                 </div>
-            </div>
             <div class="col-md-4">
                 <div class="card metric-card">
                     <div class="card-body">
@@ -124,67 +124,67 @@ async def get_dashboard():
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
 
-        <div class="row">
-            <div class="col-md-6">
-                <div class="card metric-card">
-                    <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card metric-card">
+                        <div class="card-body">
                         <h5 class="card-title">Current Difficulty</h5>
                         <p class="card-text" id="current-difficulty">Loading...</p>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="row">
+            <div class="row">
             <div class="col-md-6">
-                <div class="card metric-card">
-                    <div class="card-body">
+                    <div class="card metric-card">
+                        <div class="card-body">
                         <h5 class="card-title">Chain Work</h5>
                         <p class="card-text" id="chain-work">Loading...</p>
                     </div>
                 </div>
             </div>
-            <div class="col-md-6">
-                <div class="card metric-card">
-                    <div class="card-body">
+                <div class="col-md-6">
+                    <div class="card metric-card">
+                        <div class="card-body">
                         <h5 class="card-title">Orphan Blocks</h5>
                         <p class="card-text" id="orphan-blocks">Loading...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </div>
 
         <div class="row">
             <div class="col-md-12">
-                <div class="card metric-card">
-                    <div class="card-body">
+                    <div class="card metric-card">
+                        <div class="card-body">
                         <h5 class="card-title">Network Nodes and Hash Rates</h5>
                         <div class="node-list-container" id="miners-list">
                             <!-- Miners will be rendered here -->
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="row">
+            <div class="row">
             <div class="col-md-12">
-                <div class="card metric-card">
-                    <div class="card-body">
+                    <div class="card metric-card">
+                        <div class="card-body">
                         <h5 class="card-title">Individual Node Metrics</h5>
                         <div id="node-metrics">
                             <!-- Individual node cards will be rendered here -->
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
+        <script>
         async function refreshData() {
             try {
                 const response = await fetch('/api/metrics');
@@ -209,9 +209,9 @@ async def get_dashboard():
                 powerText = `Cumulative Mining: ${totalPower.toFixed(2)}W`;
             }
             document.getElementById('overall-power-usage').textContent = powerText;
-            document.getElementById('block-count').textContent = data.blockchain_metrics.total_blocks;
-            document.getElementById('blockchain-size').textContent = 
-                `${(data.blockchain_size / (1024 * 1024)).toFixed(2)} MB`; // Convert bytes to MB
+                        document.getElementById('block-count').textContent = data.blockchain_metrics.total_blocks;
+                        document.getElementById('blockchain-size').textContent = 
+                            `${(data.blockchain_size / (1024 * 1024)).toFixed(2)} MB`; // Convert bytes to MB
             document.getElementById('current-difficulty').textContent = data.current_difficulty || 'N/A';
             document.getElementById('chain-work').textContent = data.chain_work || 'N/A';
             document.getElementById('orphan-blocks').textContent = data.orphan_blocks_count || '0';
@@ -223,15 +223,15 @@ async def get_dashboard():
                                         .sort(([, hashRateA], [, hashRateB]) => hashRateB - hashRateA);
             if (sortedNodes.length > 0) {
                 sortedNodes.forEach(([nodeId, hashRate]) => {
-                    const p = document.createElement('p');
+                                const p = document.createElement('p');
                     p.textContent = `${nodeId}: ${hashRate.toFixed(0)} H/s`;
                     minersList.appendChild(p);
-                });
-            } else {
+                            });
+                        } else {
                 minersList.textContent = 'No network nodes found.';
-            }
+                        }
 
-            // Update Individual Node Metrics
+                        // Update Individual Node Metrics
             const nodeMetricsContainer = document.getElementById('node-metrics');
             nodeMetricsContainer.innerHTML = ''; // Clear previous
 
@@ -240,37 +240,37 @@ async def get_dashboard():
                 nodeCard.className = 'col-md-4 mb-3';
                 nodeCard.innerHTML = `
                     <div class="card node-card">
-                        <div class="card-body">
+                                    <div class="card-body">
                             <h6 class="card-title">
                                 <span class="status-indicator ${nodeData.timestamp > Date.now() / 1000 - 60 ? 'status-online' : 'status-offline'}"></span>
                                 ${nodeId}
                             </h6>
-                            <p class="card-text">CPU: ${nodeData.cpu_percent.toFixed(1)}%</p>
-                            <p class="card-text">Mem: ${nodeData.memory_percent.toFixed(1)}%</p>
-                            <p class="card-text">Temp: ${nodeData.temperature.toFixed(1)}°C</p>
-                            <p class="card-text">Power: ${nodeData.power_usage.toFixed(2)}W</p>
-                            <p class="card-text">Blocks: ${nodeData.block_count}</p>
-                            <p class="card-text">Pending TXs: ${nodeData.pending_transactions}</p>
+                                        <p class="card-text">CPU: ${nodeData.cpu_percent.toFixed(1)}%</p>
+                                        <p class="card-text">Mem: ${nodeData.memory_percent.toFixed(1)}%</p>
+                                        <p class="card-text">Temp: ${nodeData.temperature.toFixed(1)}°C</p>
+                                        <p class="card-text">Power: ${nodeData.power_usage.toFixed(2)}W</p>
+                                        <p class="card-text">Blocks: ${nodeData.block_count}</p>
+                                        <p class="card-text">Pending TXs: ${nodeData.pending_transactions}</p>
                             <p class="card-text">Hash Rate: ${data.all_miners_metrics[nodeId] || 0} H/s</p>
                             <p class="card-text">Mining: ${data.system_metrics[nodeId].is_mining ? 'Yes' : 'No'}</p>
-                        </div>
-                    </div>
-                `;
+                                    </div>
+                                </div>
+                            `;
                 nodeMetricsContainer.appendChild(nodeCard);
             });
 
             // Update TPS
             document.getElementById('tps').textContent = `${data.blockchain_metrics.tps.toFixed(2)} TPS`;
-        }
+                        }
 
         // Auto-refresh every 5 seconds
         setInterval(refreshData, 5000);
 
         // Initial load
         refreshData();
-    </script>
-</body>
-</html>
+        </script>
+    </body>
+    </html>
     """
 
 @app.get("/api/metrics")
@@ -279,7 +279,7 @@ async def get_metrics() -> Dict[str, Any]:
     # Ensure metrics instance is set before trying to use it
     if metrics is None:
         raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
-    
+
     # Get all the metrics
     system_metrics = metrics.get_system_metrics()
     power_metrics = metrics.get_power_metrics()
@@ -336,12 +336,12 @@ async def get_block_headers(start_index: int = 0, end_index: int = -1) -> List[D
     """
     if metrics is None:
         raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
-    
+
     try:
         from ..consensus.block_header import BlockHeader
         
         # Get full blocks from storage
-        blocks = metrics.get_blocks_from_storage(start_index, end_index)
+    blocks = metrics.get_blocks_from_storage(start_index, end_index)
         
         # Convert to lightweight headers
         headers = [BlockHeader.from_block(block).to_dict() for block in blocks]
@@ -426,7 +426,7 @@ async def get_system_metrics() -> Dict[str, Any]:
     if metrics is None:
         raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
     
-    return metrics.get_system_metrics()
+    return metrics.get_system_metrics() 
 
 @app.get("/api/energy")
 async def get_energy() -> Dict[str, Any]:
@@ -681,7 +681,7 @@ async def export_operation_metrics_csv(operation_type: Optional[str] = None):
             ]
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=fn, extrasaction='ignore')
-        writer.writeheader()
+    writer.writeheader()
         return StreamingResponse(io.StringIO(buf.getvalue()), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=operation-metrics.csv"})
 
 if __name__ == "__main__":

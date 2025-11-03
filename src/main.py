@@ -147,7 +147,7 @@ class BlockchainNode:
         """Async wrapper to handle blocks with chain lock."""
         async with self.chain_lock:
             self._handle_new_block_sync(block_data)
-    
+        
     def _handle_new_block(self, block_data: dict) -> None:
         """MQTT callback - schedules async handling."""
         if self.event_loop and self.event_loop.is_running():
@@ -194,7 +194,7 @@ class BlockchainNode:
                 print(f"  Network: {block.hash}")
                 print(f"  This indicates nodes were initialized at different times. Chain may be incompatible.")
                 # For now, reject the conflicting genesis. Nodes should be reset with same genesis.
-                return
+            return
 
         # Check energy metrics before validation
         energy_metrics = self.energy_monitor.get_system_metrics()
@@ -300,29 +300,29 @@ class BlockchainNode:
                 # Ensure all blocks from best chain are saved
                 for block in best_chain:
                     _db_start2 = time.time()
-                    self.storage.save_block(block)
+                self.storage.save_block(block)
                     self.metrics.record_database_operation('save_block', time.time() - _db_start2, rows_affected=1)
-            
-            # Record metrics
+                
+                # Record metrics
             if len(self.blocks) > 1:
                 self.metrics.record_block_time(block.timestamp - previous_block_timestamp)
                 self.metrics.record_consensus_time(
                     block.energy_metrics.get('consensus_time', 0)
                 )
-            
-            # Persist per-block analytics
-            try:
+                
+                # Persist per-block analytics
+                try:
                 # For genesis block, set interval to 0 to avoid unrealistic values
                 if block.block_index == 0:
                     interval = 0.0
                 else:
                     interval = block.timestamp - previous_block_timestamp
-                consensus_time = block.energy_metrics.get('consensus_time', 0)
-                power_usage = block.energy_metrics.get('power_usage', 0)
-                self.storage.save_block_metrics(block.block_index, block.timestamp, interval, consensus_time, power_usage)
-            except Exception as e:
-                print(f"[ANALYTICS] Failed saving block metrics for received block {block.block_index}: {e}")
-            
+                    consensus_time = block.energy_metrics.get('consensus_time', 0)
+                    power_usage = block.energy_metrics.get('power_usage', 0)
+                    self.storage.save_block_metrics(block.block_index, block.timestamp, interval, consensus_time, power_usage)
+                except Exception as e:
+                    print(f"[ANALYTICS] Failed saving block metrics for received block {block.block_index}: {e}")
+                
             # Check transaction finality
             for tx in block.transactions:
                 tx_hash = self.pow._get_transaction_hash(tx)
@@ -424,7 +424,7 @@ class BlockchainNode:
             
             # Record transaction for metrics
             self.metrics.record_transactions(1)
-    
+        
     def _check_system_health(self) -> bool:
         """Check if the system is healthy enough to process blocks."""
         metrics = self.energy_monitor.get_system_metrics()
@@ -493,7 +493,15 @@ class BlockchainNode:
                 end_idx = orphan_block.block_index  # Request up to orphan block index
                 params = {'start_index': start_idx, 'end_index': end_idx}
                 
-                response = await self.http_client.get(peer_url, params=params, timeout=5)
+                try:
+                    response = await self.http_client.get(peer_url, params=params, timeout=5)
+                except asyncio.CancelledError:
+                    print(f"[SYNC MISSING] Sync for missing parent was cancelled")
+                    return  # Exit gracefully
+                except Exception as e:
+                    print(f"[SYNC MISSING] HTTP error connecting to {peer['id']}: {e}")
+                    continue
+                
                 if response.status_code == 200:
                     blocks_data = response.json()
                     found_parent = False
@@ -554,7 +562,14 @@ class BlockchainNode:
             params = {'start_index': local_chain_length, 'end_index': -1}
             
             headers_start = time.time()
-            response = await self.http_client.get(headers_url, params=params, timeout=30)
+            try:
+                response = await self.http_client.get(headers_url, params=params, timeout=30)
+            except asyncio.CancelledError:
+                print(f"[HEADER-SYNC] Sync with {peer['id']} was cancelled")
+                return False
+            except Exception as e:
+                print(f"[HEADER-SYNC] HTTP error getting headers from {peer['id']}: {e}")
+                return False
             
             if response.status_code != 200:
                 print(f"[HEADER-SYNC] Failed to get headers from {peer['id']}: HTTP {response.status_code}")
@@ -606,7 +621,14 @@ class BlockchainNode:
             blocks_url = f"{base_url}/api/blocks"
             
             blocks_start = time.time()
-            response = await self.http_client.get(blocks_url, params=params, timeout=60)
+            try:
+                response = await self.http_client.get(blocks_url, params=params, timeout=60)
+            except asyncio.CancelledError:
+                print(f"[HEADER-SYNC] Block download from {peer['id']} was cancelled")
+                return False
+            except Exception as e:
+                print(f"[HEADER-SYNC] HTTP error getting blocks from {peer['id']}: {e}")
+                return False
             
             if response.status_code != 200:
                 print(f"[HEADER-SYNC] Failed to get blocks from {peer['id']}: HTTP {response.status_code}")
@@ -652,7 +674,7 @@ class BlockchainNode:
             import traceback
             traceback.print_exc()
             return False
-    
+        
     async def _sync_with_peer(self, peer: Dict[str, Any], local_chain_length: int) -> None:
         """
         Synchronize with a specific peer node.
@@ -682,6 +704,9 @@ class BlockchainNode:
                             return
                         else:
                             print(f"[SYNC] Header-first sync failed, falling back to direct sync")
+            except asyncio.CancelledError:
+                print(f"[SYNC] Peer metrics check was cancelled")
+                raise  # Re-raise to allow graceful shutdown
             except Exception as e:
                 print(f"[SYNC] Could not determine peer chain length: {e}, using direct sync")
             
@@ -690,7 +715,14 @@ class BlockchainNode:
             blocks_url = f"http://{peer['ip']}:{peer['dashboard_port']}/api/blocks"
             params = {'start_index': local_chain_length, 'end_index': -1}
             
-            response = await self.http_client.get(blocks_url, params=params, timeout=30)
+            try:
+                response = await self.http_client.get(blocks_url, params=params, timeout=30)
+            except asyncio.CancelledError:
+                print(f"[SYNC] Sync with {peer['id']} was cancelled")
+                raise  # Re-raise to allow graceful shutdown
+            except Exception as e:
+                print(f"[SYNC] HTTP error connecting to {peer['id']}: {e}")
+                return
             
             if response.status_code == 200:
                 blocks_data = response.json()
@@ -701,7 +733,7 @@ class BlockchainNode:
                     for block_data in blocks_data:
                         try:
                             block = Block.from_dict(block_data)
-                            self.storage.save_block(block)
+                                self.storage.save_block(block)
                         except Exception as e:
                             print(f"[SYNC] Error processing block from {peer['id']}: {e}")
                             continue
@@ -905,12 +937,12 @@ class BlockchainNode:
                 previous_hash = self.blocks[-1].hash if self.blocks else "0" * 64
                 previous_timestamp = self.blocks[-1].timestamp if self.blocks else 0.0
             # Lock released - mining can happen outside the lock
-            
+
             if self.pending_transactions:
                 print(f"[PROCESS TX] {len(self.pending_transactions)} pending transactions found.")
             else:
                 print(f"[PROCESS TX] No pending transactions, mining empty block.")
-            
+
             # Use captured values from locked section
             block_data = {
                 'block_index': block_index,
@@ -930,14 +962,14 @@ class BlockchainNode:
                 await asyncio.sleep(1)
                 continue
 
-            print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
+                print(f"[PROCESS TX] New block created with index {new_block.block_index} and hash {new_block.hash}.")
             print(f"[PROCESS TX] Block miner: {new_block.miner}")
             print(f"[PROCESS TX] Current node: {self.node_id}")
 
-            # Record propagation delay
-            self.metrics.record_propagation_delay(time.time() - start_time)
+                # Record propagation delay
+                self.metrics.record_propagation_delay(time.time() - start_time)
 
-            # Publish new block
+                # Publish new block
             block_payload = new_block.to_dict()
             _net_start = time.time()
             self.mqtt_client.publish_block(block_payload)
@@ -945,7 +977,7 @@ class BlockchainNode:
                 self.metrics.record_network_operation('publish_block', bytes_transferred=len(json.dumps(block_payload)), duration=time.time() - _net_start, success=True)
             except Exception:
                 pass
-            print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
+                print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
 
             # Save block to storage first (before adding to chain)
             _db_start3 = time.time()
@@ -970,34 +1002,34 @@ class BlockchainNode:
                     self.blocks = best_chain
                 else:
                     # Our mined block is part of the best chain, add it
-                    self.blocks.append(new_block)
+                self.blocks.append(new_block)
             
-            # Persist per-block analytics
-            try:
+                # Persist per-block analytics
+                try:
                 # For genesis block, set interval to 0 to avoid unrealistic values
                 if new_block.block_index == 0:
                     interval = 0.0
                 else:
                     interval = new_block.timestamp - previous_block_timestamp
-                consensus_time = new_block.energy_metrics.get('consensus_time', 0)
-                power_usage = new_block.energy_metrics.get('power_usage', 0)
-                self.storage.save_block_metrics(new_block.block_index, new_block.timestamp, interval, consensus_time, power_usage)
-            except Exception as e:
-                print(f"[ANALYTICS] Failed saving block metrics for local block {new_block.block_index}: {e}")
-            print(f"[PROCESS TX] Block {new_block.hash} added to local chain and saved.")
+                    consensus_time = new_block.energy_metrics.get('consensus_time', 0)
+                    power_usage = new_block.energy_metrics.get('power_usage', 0)
+                    self.storage.save_block_metrics(new_block.block_index, new_block.timestamp, interval, consensus_time, power_usage)
+                except Exception as e:
+                    print(f"[ANALYTICS] Failed saving block metrics for local block {new_block.block_index}: {e}")
+                print(f"[PROCESS TX] Block {new_block.hash} added to local chain and saved.")
 
-            # Record metrics for charts
-            self.metrics.record_block_time(new_block.timestamp - previous_block_timestamp)
-            self.metrics.record_consensus_time(new_block.energy_metrics.get('consensus_time', 0))
+                # Record metrics for charts
+                self.metrics.record_block_time(new_block.timestamp - previous_block_timestamp)
+                self.metrics.record_consensus_time(new_block.energy_metrics.get('consensus_time', 0))
 
             # Publish mining status
             self.mqtt_client.publish_miner_status({
-                'node_id': self.node_id,
-                'block_count': len(self.blocks),
+                    'node_id': self.node_id,
+                    'block_count': len(self.blocks),
                 'hash_rate': self.pow.network_hash_rate,
                 'difficulty': self.pow.difficulty,
                 'mining_time': new_block.energy_metrics.get('mining_time', 0)
-            })
+                })
 
             # Clear processed transactions (only if there were any)
             if self.pending_transactions:
