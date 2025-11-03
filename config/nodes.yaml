@@ -14,6 +14,9 @@ nodes:
   - id: pi_node_5
     ip: 192.168.2.105
     dashboard_port: 8005
+  - id: pi_node_6
+    ip: 192.168.2.101
+    dashboard_port: 8006
 
 mqtt:
   host: 192.168.2.11
