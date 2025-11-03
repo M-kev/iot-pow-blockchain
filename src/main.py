@@ -312,14 +312,14 @@ class BlockchainNode:
                 
                 # Persist per-block analytics
                 try:
-                # For genesis block, set interval to 0 to avoid unrealistic values
-                if block.block_index == 0:
-                    interval = 0.0
-                else:
-                    interval = block.timestamp - previous_block_timestamp
-                    consensus_time = block.energy_metrics.get('consensus_time', 0)
-                    power_usage = block.energy_metrics.get('power_usage', 0)
-                    self.storage.save_block_metrics(block.block_index, block.timestamp, interval, consensus_time, power_usage)
+                    # For genesis block, set interval to 0 to avoid unrealistic values
+                    if block.block_index == 0:
+                        interval = 0.0
+                    else:
+                        interval = block.timestamp - previous_block_timestamp
+                        consensus_time = block.energy_metrics.get('consensus_time', 0)
+                        power_usage = block.energy_metrics.get('power_usage', 0)
+                        self.storage.save_block_metrics(block.block_index, block.timestamp, interval, consensus_time, power_usage)
                 except Exception as e:
                     print(f"[ANALYTICS] Failed saving block metrics for received block {block.block_index}: {e}")
                 
