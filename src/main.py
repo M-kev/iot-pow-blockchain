@@ -505,7 +505,8 @@ class BlockchainNode:
             asyncio.create_task(self._publish_metrics_periodically()),
             asyncio.create_task(self._process_transactions_periodically()),
             asyncio.create_task(self._synchronize_chain_periodically()),
-            asyncio.create_task(self._cleanup_orphan_blocks_periodically())
+            asyncio.create_task(self._cleanup_orphan_blocks_periodically()),
+            asyncio.create_task(self._resolve_forks_periodically())
         ]
         await asyncio.gather(*self.periodic_tasks)
 
@@ -642,11 +643,29 @@ class BlockchainNode:
                 pass
             print(f"[PROCESS TX] Node {self.node_id} published new block: {new_block.hash}")
 
-            # Add block to local chain and save to storage
-            self.blocks.append(new_block)
+            # Save block to storage first (before adding to chain)
             _db_start3 = time.time()
             self.storage.save_block(new_block)
             self.metrics.record_database_operation('save_block', time.time() - _db_start3, rows_affected=1)
+            
+            # Run fork resolution to ensure we're on the best chain
+            # This is critical because other nodes may have mined competing blocks
+            all_blocks = self.storage.get_blocks()
+            best_chain = self.pow.resolve_forks(all_blocks)
+            
+            # Check if we should switch to a better chain
+            current_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
+            best_work = self.pow.calculate_chain_work(best_chain) if best_chain else 0
+            
+            if best_chain and (len(best_chain) > len(self.blocks) or best_work > current_work or 
+                               (best_work == current_work and len(best_chain) == len(self.blocks) and 
+                                best_chain[-1].hash < (self.blocks[-1].hash if self.blocks else ""))):
+                print(f"[PROCESS TX] Switching to better chain after mining: {len(best_chain)} blocks with {best_work} work")
+                self.blocks = best_chain
+            else:
+                # Our mined block is part of the best chain, add it
+                self.blocks.append(new_block)
+            
             # Persist per-block analytics
             try:
                 # For genesis block, set interval to 0 to avoid unrealistic values
@@ -684,6 +703,45 @@ class BlockchainNode:
         while True:
             await self._synchronize_chain()
             await asyncio.sleep(RASPBERRY_PI_SETTINGS['sync_interval'])
+    
+    async def _resolve_forks_periodically(self):
+        """Periodically resolve forks to ensure we're on the best chain."""
+        while True:
+            await asyncio.sleep(10)  # Check for better chains every 10 seconds
+            try:
+                # Get all stored blocks and resolve forks
+                all_blocks = self.storage.get_blocks()
+                if len(all_blocks) > 0:
+                    best_chain = self.pow.resolve_forks(all_blocks)
+                    if not best_chain:
+                        continue
+                    
+                    current_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
+                    best_work = self.pow.calculate_chain_work(best_chain)
+                    
+                    # Switch if we found a better chain (more work, or same work but deterministic tie-breaker)
+                    should_switch = False
+                    if len(best_chain) > len(self.blocks):
+                        should_switch = True
+                    elif best_work > current_work:
+                        should_switch = True
+                    elif best_work == current_work and len(best_chain) == len(self.blocks) and len(self.blocks) > 0:
+                        # Same work and length - use deterministic tie-breaker (lowest tip hash)
+                        if best_chain[-1].hash < self.blocks[-1].hash:
+                            should_switch = True
+                    
+                    if should_switch:
+                        print(f"[FORK RESOLUTION] Switching to better chain: {len(best_chain)} blocks with {best_work} work")
+                        print(f"  Old tip: {self.blocks[-1].hash[:16] if self.blocks else 'none'}...")
+                        print(f"  New tip: {best_chain[-1].hash[:16]}...")
+                        self.blocks = best_chain
+                        # Ensure all blocks from best chain are saved
+                        for block in best_chain:
+                            self.storage.save_block(block)
+            except Exception as e:
+                print(f"[FORK RESOLUTION] Error during periodic fork resolution: {e}")
+                import traceback
+                traceback.print_exc()
 
     async def _cleanup_orphan_blocks_periodically(self):
         """Periodically clean up orphan blocks that can't be connected."""
