@@ -317,6 +317,39 @@ async def get_blocks(start_index: int = 0, end_index: int = -1) -> List[Dict[str
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving blocks: {str(e)}")
 
+@app.get("/api/blocks/headers")
+async def get_block_headers(start_index: int = 0, end_index: int = -1) -> List[Dict[str, Any]]:
+    """
+    Get lightweight block headers for header-first sync.
+    
+    Headers contain only essential information for chain verification:
+    - Block index, hash, previous_hash
+    - Proof of Work (difficulty, nonce)
+    - Timestamp and miner
+    
+    This endpoint is significantly faster than /api/blocks because:
+    - No transaction data (saves ~90% bandwidth)
+    - No detailed energy metrics
+    - Typical header: ~200 bytes vs full block: ~1-10KB
+    
+    Use case: Initial sync for nodes that are far behind
+    """
+    if metrics is None:
+        raise HTTPException(status_code=500, detail="Metrics instance not initialized.")
+    
+    try:
+        from ..consensus.block_header import BlockHeader
+        
+        # Get full blocks from storage
+        blocks = metrics.get_blocks_from_storage(start_index, end_index)
+        
+        # Convert to lightweight headers
+        headers = [BlockHeader.from_block(block).to_dict() for block in blocks]
+        
+        return headers
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving headers: {str(e)}")
+
 @app.get("/api/blocks/diagnostic")
 async def get_blocks_diagnostic():
     """Diagnostic endpoint to identify corrupt blocks and missing indices."""

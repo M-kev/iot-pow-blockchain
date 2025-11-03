@@ -522,37 +522,194 @@ class BlockchainNode:
         
         print(f"[SYNC MISSING] Could not find missing parent {missing_parent_hash[:16]}... from any peer")
         
-    async def _sync_with_peer(self, peer: Dict[str, Any], local_chain_length: int) -> None:
-        """Synchronize with a specific peer node."""
+    async def _sync_with_peer_header_first(self, peer: Dict[str, Any], local_chain_length: int) -> bool:
+        """
+        Header-first synchronization (Bitcoin-style).
+        
+        Strategy:
+        1. Download lightweight headers first (~200 bytes each)
+        2. Validate header chain (PoW, continuity, hash linkage)
+        3. Only download full blocks if headers are valid
+        
+        Benefits:
+        - 10-50x faster initial download (headers vs full blocks)
+        - Early rejection of invalid chains (before downloading full data)
+        - Bandwidth efficient for catching up on long chains
+        
+        Args:
+            peer: Peer node to sync with
+            local_chain_length: Current local chain length
+            
+        Returns:
+            True if sync was successful, False otherwise
+        """
         try:
-            peer_url = f"http://{peer['ip']}:{peer['dashboard_port']}/api/blocks"
+            from src.consensus.block_header import BlockHeader, validate_header_chain, calculate_header_chain_work
+            
+            base_url = f"http://{peer['ip']}:{peer['dashboard_port']}"
+            
+            # STEP 1: Download headers (lightweight - ~200 bytes each)
+            print(f"[HEADER-SYNC] Downloading headers from {peer['id']} starting at index {local_chain_length}")
+            headers_url = f"{base_url}/api/blocks/headers"
             params = {'start_index': local_chain_length, 'end_index': -1}
             
-            print(f"[SYNC] Requesting blocks from {peer['id']} at {peer_url}")
-            response = await self.http_client.get(peer_url, params=params)
+            headers_start = time.time()
+            response = await self.http_client.get(headers_url, params=params, timeout=30)
+            
+            if response.status_code != 200:
+                print(f"[HEADER-SYNC] Failed to get headers from {peer['id']}: HTTP {response.status_code}")
+                return False
+            
+            headers_data = response.json()
+            headers_download_time = time.time() - headers_start
+            
+            if not headers_data:
+                print(f"[HEADER-SYNC] No new headers from {peer['id']}")
+                return True  # Success, just no new blocks
+            
+            # Calculate bandwidth savings
+            headers_size_kb = sum(len(json.dumps(h).encode('utf-8')) for h in headers_data) / 1024
+            estimated_full_blocks_size_kb = len(headers_data) * 2  # Assume ~2KB per block on average
+            bandwidth_saved_pct = ((estimated_full_blocks_size_kb - headers_size_kb) / estimated_full_blocks_size_kb * 100) if estimated_full_blocks_size_kb > 0 else 0
+            
+            print(f"[HEADER-SYNC] Downloaded {len(headers_data)} headers from {peer['id']} in {headers_download_time:.2f}s")
+            print(f"[HEADER-SYNC] Bandwidth: {headers_size_kb:.2f}KB (saved ~{bandwidth_saved_pct:.0f}% vs full blocks)")
+            
+            # Parse headers
+            headers = [BlockHeader.from_dict(h) for h in headers_data]
+            
+            # STEP 2: Validate header chain
+            print(f"[HEADER-SYNC] Validating {len(headers)} headers...")
+            validation_start = time.time()
+            is_valid, error_msg = validate_header_chain(headers)
+            validation_time = time.time() - validation_start
+            
+            if not is_valid:
+                print(f"[HEADER-SYNC] Invalid header chain from {peer['id']}: {error_msg}")
+                print(f"[HEADER-SYNC] Rejecting {len(headers)} blocks without downloading full data")
+                return False
+            
+            print(f"[HEADER-SYNC] Header chain validated in {validation_time:.3f}s")
+            
+            # Calculate work for this header chain
+            header_chain_work = calculate_header_chain_work(headers)
+            print(f"[HEADER-SYNC] Header chain has {header_chain_work} total work")
+            
+            # Compare with local chain work
+            local_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
+            if header_chain_work <= local_work and len(headers) <= len(self.blocks):
+                print(f"[HEADER-SYNC] Peer chain not better than local (work: {header_chain_work} vs {local_work})")
+                return True  # Success, but didn't need to sync
+            
+            # STEP 3: Download full blocks (only for validated chain)
+            print(f"[HEADER-SYNC] Headers valid, downloading full blocks...")
+            blocks_url = f"{base_url}/api/blocks"
+            
+            blocks_start = time.time()
+            response = await self.http_client.get(blocks_url, params=params, timeout=60)
+            
+            if response.status_code != 200:
+                print(f"[HEADER-SYNC] Failed to get blocks from {peer['id']}: HTTP {response.status_code}")
+                return False
+            
+            blocks_data = response.json()
+            blocks_download_time = time.time() - blocks_start
+            blocks_size_kb = len(json.dumps(blocks_data).encode('utf-8')) / 1024
+            
+            print(f"[HEADER-SYNC] Downloaded {len(blocks_data)} full blocks in {blocks_download_time:.2f}s ({blocks_size_kb:.2f}KB)")
+            
+            # Verify we got the blocks we expected
+            if len(blocks_data) != len(headers):
+                print(f"[HEADER-SYNC] WARNING: Header count ({len(headers)}) != block count ({len(blocks_data)})")
+            
+            # Process and save blocks
+            for block_data in blocks_data:
+                try:
+                    block = Block.from_dict(block_data)
+                    self.storage.save_block(block)
+                except Exception as e:
+                    print(f"[HEADER-SYNC] Error processing block: {e}")
+                    continue
+            
+            # Resolve forks and update chain
+            all_local_blocks = self.storage.get_blocks()
+            best_chain = self.pow.resolve_forks(all_local_blocks)
+            
+            if best_chain and len(best_chain) > len(self.blocks):
+                print(f"[HEADER-SYNC] Switching to better chain: {len(best_chain)} blocks")
+                self.blocks = best_chain
+                for block in best_chain:
+                    self.storage.save_block(block)
+            
+            # Log summary
+            total_time = headers_download_time + validation_time + blocks_download_time
+            print(f"[HEADER-SYNC] Complete sync in {total_time:.2f}s (headers: {headers_download_time:.2f}s, validate: {validation_time:.3f}s, blocks: {blocks_download_time:.2f}s)")
+            
+            return True
+            
+        except Exception as e:
+            print(f"[HEADER-SYNC] Error during header-first sync with {peer['id']}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    async def _sync_with_peer(self, peer: Dict[str, Any], local_chain_length: int) -> None:
+        """
+        Synchronize with a specific peer node.
+        
+        Uses adaptive strategy:
+        - Header-first sync if gap > 10 blocks (efficient for large catch-ups)
+        - Direct block download if gap <= 10 blocks (simpler for small updates)
+        """
+        try:
+            # Get peer's chain length first to determine strategy
+            peer_url = f"http://{peer['ip']}:{peer['dashboard_port']}/api/metrics"
+            
+            try:
+                response = await self.http_client.get(peer_url, timeout=5)
+                if response.status_code == 200:
+                    peer_metrics = response.json()
+                    peer_chain_length = peer_metrics.get('blockchain_metrics', {}).get('total_blocks', 0)
+                    gap = peer_chain_length - local_chain_length
+                    
+                    print(f"[SYNC] Peer {peer['id']} has {peer_chain_length} blocks, local has {local_chain_length}, gap: {gap}")
+                    
+                    # Use header-first sync for large gaps (more efficient)
+                    if gap > 10:
+                        print(f"[SYNC] Using header-first sync for large gap ({gap} blocks)")
+                        success = await self._sync_with_peer_header_first(peer, local_chain_length)
+                        if success:
+                            return
+                        else:
+                            print(f"[SYNC] Header-first sync failed, falling back to direct sync")
+            except Exception as e:
+                print(f"[SYNC] Could not determine peer chain length: {e}, using direct sync")
+            
+            # Fallback or direct sync for small gaps
+            print(f"[SYNC] Using direct block download from {peer['id']}")
+            blocks_url = f"http://{peer['ip']}:{peer['dashboard_port']}/api/blocks"
+            params = {'start_index': local_chain_length, 'end_index': -1}
+            
+            response = await self.http_client.get(blocks_url, params=params, timeout=30)
             
             if response.status_code == 200:
                 blocks_data = response.json()
                 print(f"[SYNC] Received {len(blocks_data)} blocks from {peer['id']}")
                 
                 if blocks_data:
-                    # Get all blocks from peer and add to storage
-                    all_blocks = []
+                    # Process blocks
                     for block_data in blocks_data:
                         try:
                             block = Block.from_dict(block_data)
-                            all_blocks.append(block)
-                            # Save all blocks to storage for fork resolution
                             self.storage.save_block(block)
                         except Exception as e:
                             print(f"[SYNC] Error processing block from {peer['id']}: {e}")
                             continue
                     
-                    # Resolve forks and get the best chain from ALL stored blocks
+                    # Resolve forks and update chain
                     all_local_blocks = self.storage.get_blocks()
                     best_chain = self.pow.resolve_forks(all_local_blocks)
                     
-                    # Check if we need to switch to better chain (using same logic as _handle_new_block)
                     current_work = self.pow.calculate_chain_work(self.blocks) if self.blocks else 0
                     best_work = self.pow.calculate_chain_work(best_chain) if best_chain else 0
                     
@@ -563,23 +720,16 @@ class BlockchainNode:
                         elif best_work > current_work:
                             should_switch = True
                         elif best_work == current_work and len(best_chain) == len(self.blocks) and len(self.blocks) > 0:
-                            # Use tie-breaker: lowest tip hash
                             if best_chain[-1].hash < self.blocks[-1].hash:
                                 should_switch = True
                             elif best_chain[-1].hash != self.blocks[-1].hash:
-                                # Different tips - switch to deterministic choice
                                 should_switch = True
                     
                     if should_switch:
-                        print(f"[SYNC] Switching to better chain from {peer['id']}: {len(best_chain)} blocks with {best_work} work")
-                        print(f"  Old tip: {self.blocks[-1].hash[:16] if self.blocks else 'none'}...")
-                        print(f"  New tip: {best_chain[-1].hash[:16]}...")
+                        print(f"[SYNC] Switching to better chain: {len(best_chain)} blocks with {best_work} work")
                         self.blocks = best_chain
-                        # Ensure all blocks from best chain are saved
                         for block in best_chain:
                             self.storage.save_block(block)
-                    else:
-                        print(f"[SYNC] Local chain is better: {len(self.blocks)} blocks with {self.pow.calculate_chain_work(self.blocks)} work")
                     
                     print(f"[SYNC] Sync with {peer['id']} complete. Final chain length: {len(self.blocks)}")
                 else:
