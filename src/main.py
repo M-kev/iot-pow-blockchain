@@ -202,8 +202,21 @@ class BlockchainNode:
             # Also check if this could be the next sequential block (most common case)
             is_next_block = (self.blocks and block.previous_hash == self.blocks[-1].hash)
             
-            # If parent doesn't exist and it's not the next sequential block, it's an orphan
-            if not parent_exists and not is_next_block and block.previous_hash != "0" * 64:  # Genesis parent hash
+            # Check if this is a competing block at the same index (fork scenario)
+            # This happens when multiple nodes mine blocks with same previous_hash
+            is_competing_block = False
+            if self.blocks and len(self.blocks) > block.block_index:
+                # We already have a block at this index
+                existing_block_at_index = self.blocks[block.block_index]
+                if existing_block_at_index.hash != block.hash and existing_block_at_index.previous_hash == block.previous_hash:
+                    # Different block at same index with same parent = competing block (fork)
+                    is_competing_block = True
+                    print(f"[HANDLE BLOCK] Detected competing block at index {block.block_index}")
+                    print(f"  Existing: {existing_block_at_index.hash[:16]}... (miner: {existing_block_at_index.miner})")
+                    print(f"  Received: {block.hash[:16]}... (miner: {block.miner})")
+            
+            # If parent doesn't exist and it's not the next sequential block and not a competing block, it's an orphan
+            if not parent_exists and not is_next_block and not is_competing_block and block.previous_hash != "0" * 64:  # Genesis parent hash
                 if self.pow.handle_orphan_block(block, all_stored_blocks):
                     print(f"[HANDLE BLOCK] Stored orphan block {block.hash[:16]}... (index {block.block_index}, parent not found)")
                     # Still validate to track metrics for orphan handling
@@ -215,16 +228,23 @@ class BlockchainNode:
         if valid:
             print(f"[HANDLE BLOCK] Block {block.hash} validation successful.")
             
-            # Add block to local chain
-            self.blocks.append(block)
+            # Store the block (competing blocks are stored for fork resolution)
             _db_start = time.time()
             self.storage.save_block(block)
             self.metrics.record_database_operation('save_block', time.time() - _db_start, rows_affected=1)
             
+            # If this is a competing block, don't append to self.blocks directly
+            # Let fork resolution decide which chain to use
+            if is_competing_block:
+                print(f"[HANDLE BLOCK] Stored competing block. Will resolve fork now.")
+            else:
+                # For normal sequential blocks, append to chain
+                self.blocks.append(block)
+            
             # Process any pending orphan blocks
             self.blocks = self.pow.process_pending_blocks(self.blocks)
             
-            # Resolve forks and get the best chain
+            # Resolve forks and get the best chain (important for competing blocks)
             all_blocks = self.storage.get_blocks()  # Get all blocks from storage
             best_chain = self.pow.resolve_forks(all_blocks)
             

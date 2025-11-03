@@ -88,6 +88,7 @@ class ProofOfWork:
         """
         Find the chain with the most cumulative proof-of-work.
         This implements Bitcoin's longest chain rule.
+        When work is equal, prefer longer chain, then use deterministic hash tie-breaker.
         """
         if not all_blocks:
             return []
@@ -104,6 +105,17 @@ class ProofOfWork:
             if chain_work > best_work:
                 best_work = chain_work
                 best_chain = chain
+            elif chain_work == best_work and chain_work > 0:
+                # Tie-breaker: when work is equal, prefer longer chain
+                if len(chain) > len(best_chain):
+                    best_chain = chain
+                elif len(chain) == len(best_chain) and len(chain) > 0:
+                    # If length is also equal, use deterministic tie-breaker: lowest hash of tip block
+                    # This ensures all nodes make the same choice
+                    chain_tip_hash = chain[-1].hash
+                    best_tip_hash = best_chain[-1].hash
+                    if chain_tip_hash < best_tip_hash:
+                        best_chain = chain
         
         return best_chain
     
