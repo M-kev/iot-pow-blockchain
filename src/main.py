@@ -461,7 +461,10 @@ class BlockchainNode:
             try:
                 print(f"Attempting to sync with peer: {peer['id']} at {peer['ip']}:{peer['dashboard_port']}")
                 await self._sync_with_peer(peer, local_chain_length)
-            except Exception as e:
+            except (asyncio.CancelledError, Exception) as e:
+                if isinstance(e, asyncio.CancelledError):
+                    print(f"Sync with peer {peer['id']} was cancelled, continuing to next peer")
+                    continue  # Try next peer
                 print(f"Error querying peer {peer['id']}: {e}")
         
         print("Chain synchronization complete")
