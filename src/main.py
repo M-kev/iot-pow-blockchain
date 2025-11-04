@@ -495,12 +495,12 @@ class BlockchainNode:
                 
                 try:
                     response = await self.http_client.get(peer_url, params=params, timeout=5)
-                except asyncio.CancelledError:
-                    print(f"[SYNC MISSING] Sync for missing parent was cancelled")
-                    return  # Exit gracefully
-                except Exception as e:
-                    print(f"[SYNC MISSING] HTTP error connecting to {peer['id']}: {e}")
-                    continue
+                except (asyncio.CancelledError, Exception) as e:
+                    if isinstance(e, asyncio.CancelledError):
+                        print(f"[SYNC MISSING] Sync for missing parent was cancelled")
+                    else:
+                        print(f"[SYNC MISSING] HTTP error connecting to {peer['id']}: {e}")
+                    return  # Exit gracefully for both cases
                 
                 if response.status_code == 200:
                     blocks_data = response.json()
@@ -704,10 +704,10 @@ class BlockchainNode:
                             return
                         else:
                             print(f"[SYNC] Header-first sync failed, falling back to direct sync")
-            except asyncio.CancelledError:
-                print(f"[SYNC] Peer metrics check was cancelled")
-                raise  # Re-raise to allow graceful shutdown
-            except Exception as e:
+            except (asyncio.CancelledError, Exception) as e:
+                if isinstance(e, asyncio.CancelledError):
+                    print(f"[SYNC] Peer metrics check was cancelled, exiting")
+                    return  # Exit gracefully
                 print(f"[SYNC] Could not determine peer chain length: {e}, using direct sync")
             
             # Fallback or direct sync for small gaps
@@ -717,12 +717,12 @@ class BlockchainNode:
             
             try:
                 response = await self.http_client.get(blocks_url, params=params, timeout=30)
-            except asyncio.CancelledError:
-                print(f"[SYNC] Sync with {peer['id']} was cancelled")
-                raise  # Re-raise to allow graceful shutdown
-            except Exception as e:
-                print(f"[SYNC] HTTP error connecting to {peer['id']}: {e}")
-                return
+            except (asyncio.CancelledError, Exception) as e:
+                if isinstance(e, asyncio.CancelledError):
+                    print(f"[SYNC] Sync with {peer['id']} was cancelled")
+                else:
+                    print(f"[SYNC] HTTP error connecting to {peer['id']}: {e}")
+                return  # Exit gracefully
             
             if response.status_code == 200:
                 blocks_data = response.json()
